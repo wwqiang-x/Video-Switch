@@ -1,11 +1,12 @@
 """Main desktop window and step-one interface shell."""
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -24,7 +25,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from video_switch.services.toolchain import ToolchainDetector, ToolchainStatus
 from video_switch.ui.fonts import register_cjk_fonts
+from video_switch.ui.settings_dialog import SettingsDialog
 from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 
 APP_NAME = "Video Switch"
@@ -123,6 +126,10 @@ class MainWindow(QMainWindow):
         register_cjk_fonts()
         self.settings = QSettings("VideoSwitch", "Video Switch")
         self.theme_name = str(self.settings.value("ui/theme", "light"))
+        self.toolchain_detector = ToolchainDetector(self)
+        self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
+        self.toolchain_detector.finished.connect(self._on_toolchain_detected)
+        self.toolchain_status: ToolchainStatus | None = None
 
         self.setWindowTitle(f"{APP_NAME} - 视频转换器")
         self.resize(1280, 800)
@@ -130,6 +137,7 @@ class MainWindow(QMainWindow):
 
         self._build_interface()
         self._apply_theme()
+        QTimer.singleShot(0, self._detect_toolchain)
 
     def _build_interface(self) -> None:
         root = QWidget()
@@ -215,9 +223,7 @@ class MainWindow(QMainWindow):
         self.settings_button = QToolButton()
         self.settings_button.setObjectName("IconButton")
         self.settings_button.setToolTip("应用设置")
-        self.settings_button.clicked.connect(
-            lambda: self._show_footer_message("应用设置将在后续步骤接入")
-        )
+        self.settings_button.clicked.connect(self._open_settings)
 
         layout.addWidget(brand_mark)
         layout.addWidget(brand_copy)
@@ -484,17 +490,18 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 7, 16, 7)
         layout.setSpacing(8)
 
-        status_dot = QFrame()
-        status_dot.setObjectName("StatusDot")
-        status_dot.setFixedSize(8, 8)
+        self.status_dot = QFrame()
+        self.status_dot.setObjectName("StatusDot")
+        self.status_dot.setProperty("state", "pending")
+        self.status_dot.setFixedSize(8, 8)
 
-        self.footer_status_label = QLabel("FFmpeg 环境将在下一步检测")
+        self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 1")
+        stage_label = QLabel("开发阶段 · 步骤 2")
         stage_label.setProperty("muted", True)
 
-        layout.addWidget(status_dot)
+        layout.addWidget(self.status_dot)
         layout.addWidget(self.footer_status_label)
         layout.addStretch(1)
         layout.addWidget(stage_label)
@@ -502,6 +509,60 @@ class MainWindow(QMainWindow):
 
     def _show_footer_message(self, message: str) -> None:
         self.footer_status_label.setText(message)
+
+    def _detect_toolchain(self) -> None:
+        configured_ffmpeg = str(self.settings.value("toolchain/ffmpeg_path", ""))
+        configured_ffprobe = str(self.settings.value("toolchain/ffprobe_path", ""))
+        self.toolchain_detector.detect(
+            configured_ffmpeg or None,
+            configured_ffprobe or None,
+        )
+
+    def _on_toolchain_detection_started(self) -> None:
+        self._set_status_state("pending")
+        self.footer_status_label.setText("正在检测 FFmpeg 环境...")
+        self.footer_status_label.setToolTip("")
+
+    def _on_toolchain_detected(self, status: ToolchainStatus) -> None:
+        self.toolchain_status = status
+        self.footer_status_label.setText(status.summary)
+
+        if status.ready:
+            self._set_status_state("ready")
+        else:
+            self._set_status_state("error")
+
+        details = [
+            f"ffmpeg：{status.ffmpeg.executable or '未找到'}"
+            if status.ffmpeg.ready
+            else f"ffmpeg：{status.ffmpeg.error or '未就绪'}",
+            f"ffprobe：{status.ffprobe.executable or '未找到'}"
+            if status.ffprobe.ready
+            else f"ffprobe：{status.ffprobe.error or '未就绪'}",
+        ]
+        self.footer_status_label.setToolTip("\n".join(details))
+
+    def _set_status_state(self, state: str) -> None:
+        self.status_dot.setProperty("state", state)
+        self.status_dot.style().unpolish(self.status_dot)
+        self.status_dot.style().polish(self.status_dot)
+
+    def _open_settings(self) -> None:
+        dialog = SettingsDialog(
+            ffmpeg_path=str(self.settings.value("toolchain/ffmpeg_path", "")),
+            ffprobe_path=str(self.settings.value("toolchain/ffprobe_path", "")),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        status = dialog.result_status
+        if status is None or not status.ready:
+            return
+
+        self.settings.setValue("toolchain/ffmpeg_path", str(status.ffmpeg.executable))
+        self.settings.setValue("toolchain/ffprobe_path", str(status.ffprobe.executable))
+        self._on_toolchain_detected(status)
 
     def _toggle_theme(self) -> None:
         self.theme_name = "dark" if self.theme_name == "light" else "light"

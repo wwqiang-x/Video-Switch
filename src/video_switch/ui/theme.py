@@ -20,8 +20,10 @@ class ThemePalette:
     primary_hover: str
     primary_soft: str
     success: str
+    success_soft: str
     warning: str
     danger: str
+    danger_soft: str
     preview_bg: str
     preview_text: str
     preview_muted: str
@@ -42,8 +44,10 @@ LIGHT_PALETTE = ThemePalette(
     primary_hover="#1d4ed8",
     primary_soft="#e7efff",
     success="#15803d",
+    success_soft="#eaf7ef",
     warning="#b45309",
     danger="#dc2626",
+    danger_soft="#fff0f0",
     preview_bg="#111827",
     preview_text="#f8fafc",
     preview_muted="#a8b3c2",
@@ -64,8 +68,10 @@ DARK_PALETTE = ThemePalette(
     primary_hover="#6aa0fa",
     primary_soft="#1d355e",
     success="#4ade80",
+    success_soft="#163324",
     warning="#fbbf24",
     danger="#f87171",
+    danger_soft="#3a2024",
     preview_bg="#080c10",
     preview_text="#f8fafc",
     preview_muted="#94a3b8",
@@ -88,7 +94,8 @@ QWidget {{
 }}
 
 QMainWindow,
-QWidget#AppRoot {{
+QWidget#AppRoot,
+QDialog {{
     background: {palette.app_bg};
 }}
 
@@ -157,6 +164,26 @@ QLabel#CountBadge {{
     font-size: 12px;
     font-weight: 650;
     padding: 3px 9px;
+}}
+
+QLabel#ToolStatus {{
+    background: {palette.surface_alt};
+    border: 1px solid {palette.border};
+    border-radius: 6px;
+    color: {palette.muted};
+    padding: 10px 12px;
+}}
+
+QLabel#ToolStatus[state="ready"] {{
+    background: {palette.success_soft};
+    border-color: {palette.success};
+    color: {palette.success};
+}}
+
+QLabel#ToolStatus[state="error"] {{
+    background: {palette.danger_soft};
+    border-color: {palette.danger};
+    color: {palette.danger};
 }}
 
 QLabel#QueueCount {{
@@ -354,6 +381,14 @@ QScrollBar::sub-line:vertical {{
 QFrame#StatusDot {{
     background: {palette.warning};
     border-radius: 4px;
+}}
+
+QFrame#StatusDot[state="ready"] {{
+    background: {palette.success};
+}}
+
+QFrame#StatusDot[state="error"] {{
+    background: {palette.danger};
 }}
 
 QSplitter::handle {{

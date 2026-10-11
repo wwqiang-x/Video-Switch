@@ -4,13 +4,16 @@ Video Switch 是一款基于 PySide6 的桌面视频格式转换器。应用通�
 FFmpeg 命令行完成视频信息读取、缩略图生成和格式转换，不依赖远程 API，
 也不会上传用户视频。
 
-> 当前状态：步骤 1 已完成，桌面客户端界面骨架可以运行，视频业务功能尚未接入。
+> 当前状态：步骤 2 已完成，应用能够检测和配置 FFmpeg 环境，视频业务功能尚未接入。
 
-![Video Switch 主界面](docs/images/ui-step1.png)
+![Video Switch 主界面](docs/images/ui-step2.png)
+
+![FFmpeg 环境设置](docs/images/ui-step2-settings.png)
 
 ## 项目目标
 
 - 导入常见视频并显示文件信息。
+- 自动检测、验证并配置本机 FFmpeg 和 ffprobe。
 - 通过 ffprobe 读取时长、分辨率、帧率和音视频编码。
 - 通过 ffmpeg 生成并展示视频缩略图。
 - 提供 MP4、MKV、WebM、MP3、WAV 和 GIF 等转换预设。
@@ -72,7 +75,7 @@ video-switch/
 
 - [x] 步骤 0：项目结构、uv 配置、桌面运行环境和文档骨架
 - [x] 步骤 1：桌面客户端主界面
-- [ ] 步骤 2：FFmpeg 环境检测
+- [x] 步骤 2：FFmpeg 环境检测
 - [ ] 步骤 3：视频导入流程
 - [ ] 步骤 4：视频信息读取
 - [ ] 步骤 5：缩略图生成
