@@ -5,12 +5,15 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
+from video_switch.models.media_info import MediaInfo
+
 
 class TaskStatus(StrEnum):
     """Current processing state for one media task."""
 
-    WAITING_FOR_METADATA = "待读取信息"
-    METADATA_READY = "信息已读取"
+    WAITING_FOR_METADATA = "待读取"
+    PROBING_METADATA = "读取中"
+    METADATA_READY = "已读取"
     CONVERTING = "转换中"
     COMPLETED = "已完成"
     FAILED = "失败"
@@ -25,6 +28,9 @@ class MediaTask:
     content_signature: str
     imported_at: datetime
     status: TaskStatus = TaskStatus.WAITING_FOR_METADATA
+    media_info: MediaInfo | None = None
+    probe_error: str | None = None
+    raw_probe_output: str | None = None
 
     @property
     def display_name(self) -> str:

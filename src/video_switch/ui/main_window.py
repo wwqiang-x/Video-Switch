@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from video_switch.models.media_task import MediaTask
+from video_switch.models.media_task import MediaTask, TaskStatus
+from video_switch.services.media_probe import MediaProbeService, ProbeResult
 from video_switch.services.toolchain import ToolchainDetector, ToolchainStatus
 from video_switch.services.video_importer import (
     ImportResult,
@@ -144,9 +145,13 @@ class MainWindow(QMainWindow):
         self.theme_name = str(self.settings.value("ui/theme", "light"))
         self.importer = VideoImporter()
         self.tasks: dict[str, MediaTask] = {}
+        self.task_items: dict[str, QListWidgetItem] = {}
         self._footer_reset_timer = QTimer(self)
         self._footer_reset_timer.setSingleShot(True)
         self._footer_reset_timer.timeout.connect(self._restore_toolchain_status)
+        self.probe_service = MediaProbeService(self)
+        self.probe_service.task_started.connect(self._on_task_probe_started)
+        self.probe_service.task_finished.connect(self._on_task_probe_finished)
         self.toolchain_detector = ToolchainDetector(self)
         self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
         self.toolchain_detector.finished.connect(self._on_toolchain_detected)
@@ -358,24 +363,36 @@ class MainWindow(QMainWindow):
         self.preview_hint = QLabel("或点击右上角“添加视频”")
         self.preview_hint.setObjectName("PreviewHint")
         self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_hint.setWordWrap(True)
 
         preview_layout.addWidget(self.preview_icon)
         preview_layout.addWidget(self.preview_title)
         preview_layout.addWidget(self.preview_hint)
 
         metrics = QWidget()
-        metrics_layout = QHBoxLayout(metrics)
+        metrics_layout = QGridLayout(metrics)
         metrics_layout.setContentsMargins(0, 0, 0, 0)
-        metrics_layout.setSpacing(24)
+        metrics_layout.setHorizontalSpacing(24)
+        metrics_layout.setVerticalSpacing(10)
         self.metric_duration = MetricItem("时长")
         self.metric_resolution = MetricItem("分辨率")
-        self.metric_video_codec = MetricItem("视频编码")
+        self.metric_frame_rate = MetricItem("帧率")
         self.metric_file_size = MetricItem("文件大小")
-        metrics_layout.addWidget(self.metric_duration)
-        metrics_layout.addWidget(self.metric_resolution)
-        metrics_layout.addWidget(self.metric_video_codec)
-        metrics_layout.addWidget(self.metric_file_size)
-        metrics_layout.addStretch(1)
+        self.metric_video_codec = MetricItem("视频编码")
+        self.metric_audio_codec = MetricItem("音频编码")
+        self.metric_bit_rate = MetricItem("总码率")
+        self.metric_container = MetricItem("容器")
+
+        metrics_layout.addWidget(self.metric_duration, 0, 0)
+        metrics_layout.addWidget(self.metric_resolution, 0, 1)
+        metrics_layout.addWidget(self.metric_frame_rate, 0, 2)
+        metrics_layout.addWidget(self.metric_file_size, 0, 3)
+        metrics_layout.addWidget(self.metric_video_codec, 1, 0)
+        metrics_layout.addWidget(self.metric_audio_codec, 1, 1)
+        metrics_layout.addWidget(self.metric_bit_rate, 1, 2)
+        metrics_layout.addWidget(self.metric_container, 1, 3)
+        for column in range(4):
+            metrics_layout.setColumnStretch(column, 1)
 
         source_row = QFrame()
         source_row.setObjectName("SourcePathRow")
@@ -534,7 +551,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 3")
+        stage_label = QLabel("开发阶段 · 步骤 4")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -572,6 +589,7 @@ class MainWindow(QMainWindow):
         self._update_task_actions()
         if first_item is not None:
             self.task_list.setCurrentItem(first_item)
+        self._probe_pending_tasks()
 
         message, details, state = self._import_feedback(result)
         self._show_footer_message(
@@ -591,6 +609,7 @@ class MainWindow(QMainWindow):
         item.setSizeHint(QSize(0, 62))
         item.setIcon(self._task_icon())
         self.task_list.addItem(item)
+        self.task_items[task.key] = item
         return item
 
     def _task_icon(self) -> QIcon:
@@ -643,31 +662,129 @@ class MainWindow(QMainWindow):
             self._update_task_actions()
             return
 
-        self.media_status.setText("已导入")
-        self.metric_duration.value_label.setText("--")
-        self.metric_resolution.value_label.setText("--")
-        self.metric_video_codec.value_label.setText("--")
-        self.metric_file_size.value_label.setText(format_file_size(task.size_bytes))
+        self._apply_task_to_preview(task)
+        self._update_task_actions()
+
+    def _apply_task_to_preview(self, task: MediaTask) -> None:
+        info = task.media_info
         self.source_path.setText(str(task.path))
         self.preview_title.setText(task.display_name)
         self.preview_title.setToolTip(task.display_name)
-        self.preview_hint.setText("视频信息将在步骤 4 读取")
+        self.metric_file_size.value_label.setText(format_file_size(task.size_bytes))
+        self.metric_duration.value_label.setText(info.duration_text if info else "--")
+        self.metric_resolution.value_label.setText(info.resolution_text if info else "--")
+        self.metric_frame_rate.value_label.setText(info.frame_rate_text if info else "--")
+        self.metric_video_codec.value_label.setText(info.video_codec_text if info else "--")
+        self.metric_audio_codec.value_label.setText(info.audio_codec_text if info else "--")
+        self.metric_bit_rate.value_label.setText(info.bit_rate_text if info else "--")
+        self.metric_container.value_label.setText(info.container_text if info else "--")
+        self.metric_video_codec.value_label.setToolTip(
+            f"像素格式：{info.pixel_format}" if info and info.pixel_format else ""
+        )
+        self.metric_audio_codec.value_label.setToolTip(
+            f"采样率：{info.audio_sample_rate} Hz" if info and info.audio_sample_rate else ""
+        )
+
+        if task.status == TaskStatus.PROBING_METADATA:
+            self.media_status.setText("读取中")
+            self.preview_hint.setText("正在读取视频信息...")
+        elif task.status == TaskStatus.METADATA_READY:
+            self.media_status.setText("信息已读取")
+            self.preview_hint.setText("缩略图将在步骤 5 生成")
+        elif task.status == TaskStatus.FAILED:
+            self.media_status.setText("读取失败")
+            self.preview_hint.setText(task.probe_error or "无法读取视频信息")
+        else:
+            self.media_status.setText("已导入")
+            if self._available_ffprobe_path():
+                self.preview_hint.setText("正在等待读取视频信息")
+            else:
+                self.preview_hint.setText("请先在设置中配置 ffprobe 环境")
+
+        self.preview_hint.setToolTip(task.probe_error or "")
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("视频转换将在步骤 7 接入")
-        self._update_task_actions()
 
     def _clear_preview(self) -> None:
         self.media_status.setText("未选择")
         self.metric_duration.value_label.setText("--")
         self.metric_resolution.value_label.setText("--")
+        self.metric_frame_rate.value_label.setText("--")
         self.metric_video_codec.value_label.setText("--")
+        self.metric_audio_codec.value_label.setText("--")
+        self.metric_bit_rate.value_label.setText("--")
+        self.metric_container.value_label.setText("--")
         self.metric_file_size.value_label.setText("--")
+        self.metric_video_codec.value_label.setToolTip("")
+        self.metric_audio_codec.value_label.setToolTip("")
         self.source_path.setText("尚未导入视频")
         self.preview_title.setText("拖入视频文件")
         self.preview_title.setToolTip("")
         self.preview_hint.setText("或点击右上角“添加视频”")
+        self.preview_hint.setToolTip("")
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("请先导入视频")
+
+    def _probe_pending_tasks(self) -> None:
+        ffprobe_path = self._available_ffprobe_path()
+        if ffprobe_path is None:
+            return
+        for task in self.tasks.values():
+            if task.status == TaskStatus.WAITING_FOR_METADATA:
+                self.probe_service.enqueue(task, ffprobe_path)
+
+    def _available_ffprobe_path(self) -> Path | None:
+        if self.toolchain_status is None or not self.toolchain_status.ffprobe.ready:
+            return None
+        return self.toolchain_status.ffprobe.executable
+
+    def _on_task_probe_started(self, task_key: str) -> None:
+        task = self.tasks.get(task_key)
+        if task is None:
+            return
+        task.status = TaskStatus.PROBING_METADATA
+        task.probe_error = None
+        self._update_task_item(task)
+        if self._current_task_key() == task_key:
+            self._apply_task_to_preview(task)
+
+    def _on_task_probe_finished(self, result: ProbeResult) -> None:
+        task = self.tasks.get(result.task_key)
+        if task is None:
+            return
+
+        task.raw_probe_output = result.raw_output or None
+        if result.info is not None:
+            task.media_info = result.info
+            task.probe_error = None
+            task.status = TaskStatus.METADATA_READY
+        else:
+            task.media_info = None
+            task.probe_error = result.error or "无法读取视频信息"
+            task.status = TaskStatus.FAILED
+
+        self._update_task_item(task)
+        if self._current_task_key() == task.key:
+            self._apply_task_to_preview(task)
+
+    def _update_task_item(self, task: MediaTask) -> None:
+        item = self.task_items.get(task.key)
+        if item is None:
+            return
+        item.setText(
+            f"{task.display_name}\n"
+            f"{task.extension}  ·  {format_file_size(task.size_bytes)}  ·  {task.status_text}"
+        )
+        tooltip = str(task.path)
+        if task.probe_error:
+            tooltip = f"{tooltip}\n{task.probe_error}"
+        item.setToolTip(tooltip)
+
+    def _current_task_key(self) -> str | None:
+        item = self.task_list.currentItem()
+        if item is None:
+            return None
+        return str(item.data(Qt.ItemDataRole.UserRole))
 
     def _remove_selected_task(self) -> None:
         item = self.task_list.currentItem()
@@ -675,6 +792,8 @@ class MainWindow(QMainWindow):
             return
         task_key = str(item.data(Qt.ItemDataRole.UserRole))
         self.tasks.pop(task_key, None)
+        self.task_items.pop(task_key, None)
+        self.probe_service.cancel_task(task_key)
         self.task_list.takeItem(self.task_list.row(item))
         self._update_task_actions()
         self._show_footer_message("已移除所选任务", timeout=4000)
@@ -693,7 +812,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
         if dialog.clickedButton() is not clear_button:
             return
+        self.probe_service.cancel_all()
         self.tasks.clear()
+        self.task_items.clear()
         self.task_list.clear()
         self._update_task_actions()
         self._show_footer_message("任务队列已清空", timeout=4000)
@@ -789,6 +910,7 @@ class MainWindow(QMainWindow):
             else f"ffprobe：{status.ffprobe.error or '未就绪'}",
         ]
         self.footer_status_label.setToolTip("\n".join(details))
+        self._probe_pending_tasks()
 
     def _set_status_state(self, state: str) -> None:
         self.status_dot.setProperty("state", state)

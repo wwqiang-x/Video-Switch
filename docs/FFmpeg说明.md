@@ -29,6 +29,17 @@ FFmpeg 是一套开源的音视频命令行工具。本项目将它作为本地�
 忽略，只用于本地测试。应用支持自动检测该目录，也支持用户在设置窗口中手动
 选择 `ffmpeg.exe` 和 `ffprobe.exe`。
 
+## 视频信息读取
+
+应用使用 ffprobe 的 JSON 输出读取媒体信息：
+
+```powershell
+ffprobe -v error -print_format json -show_format -show_streams input.mp4
+```
+
+应用会解析视频流和音频流，提取时长、分辨率、帧率、编码、码率、采样率和
+声道数。读取失败时不会终止其他任务。
+
 ## 面试需要掌握的概念
 
 - MP4、MKV、WebM 是容器格式。
