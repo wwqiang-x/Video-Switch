@@ -9,9 +9,9 @@ from PySide6.QtCore import QObject, QProcess, QStandardPaths, QTimer, Signal
 
 from video_switch.models.media_task import MediaTask
 
-THUMBNAIL_WIDTH = 1280
+THUMBNAIL_WIDTH = 1920
 THUMBNAIL_TIMEOUT_MS = 20_000
-THUMBNAIL_CACHE_VERSION = "v2"
+THUMBNAIL_CACHE_VERSION = "v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +134,7 @@ class ThumbnailService(QObject):
     def delete_cached(self, content_signature: str) -> None:
         """Delete one cached thumbnail if it exists."""
         thumbnail_cache_path(self.cache_dir, content_signature).unlink(missing_ok=True)
+        (self.cache_dir / f"v2-{content_signature}.jpg").unlink(missing_ok=True)
         (self.cache_dir / f"{content_signature}.jpg").unlink(missing_ok=True)
 
     def _start_next(self) -> None:
@@ -181,9 +182,9 @@ class ThumbnailService(QObject):
                 "-sn",
                 "-dn",
                 "-vf",
-                (f"scale={THUMBNAIL_WIDTH}:-2:force_original_aspect_ratio=decrease"),
+                f"scale='min({THUMBNAIL_WIDTH},iw)':-2",
                 "-q:v",
-                "2",
+                "1",
                 "-y",
                 str(output_path),
             ],

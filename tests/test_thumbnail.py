@@ -29,4 +29,4 @@ def test_thumbnail_cache_path() -> None:
 
     result = thumbnail_cache_path(cache_dir, "abc123")
 
-    assert result == cache_dir / "v2-abc123.jpg"
+    assert result == cache_dir / "v3-abc123.jpg"

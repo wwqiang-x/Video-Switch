@@ -45,12 +45,13 @@ ffprobe -v error -print_format json -show_format -show_streams input.mp4
 应用使用 ffmpeg 从指定时间点截取一帧，并缩放到适合预览的宽度：
 
 ```powershell
-ffmpeg -ss 10 -i input.mp4 -frames:v 1 -vf "scale=1280:-2" -q:v 2 thumbnail.jpg
+ffmpeg -ss 10 -i input.mp4 -frames:v 1 -vf "scale='min(1920,iw)':-2" -q:v 1 thumbnail.jpg
 ```
 
 如果首个位置截取失败，应用会依次尝试第 1 秒、视频中段、结尾和首帧。
 缩略图固定从视频约 10% 位置开始尝试，不是随机抽取。生成的图片保存在应用
-缓存目录，不修改源视频。
+缓存目录，不修改源视频。1080p 视频会生成完整 1920×1080 缩略图，720p
+视频保持 1280×720，不进行无意义的放大。
 
 ## 面试需要掌握的概念
 
