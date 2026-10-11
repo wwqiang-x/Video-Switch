@@ -22,6 +22,7 @@ class MediaTask:
 
     path: Path
     size_bytes: int
+    content_signature: str
     imported_at: datetime
     status: TaskStatus = TaskStatus.WAITING_FOR_METADATA
 

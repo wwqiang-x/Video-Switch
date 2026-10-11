@@ -35,6 +35,30 @@ def test_import_ignores_duplicate_video(tmp_path: Path) -> None:
     assert second.duplicates == [video.resolve()]
 
 
+def test_import_ignores_same_content_with_different_name(tmp_path: Path) -> None:
+    original = tmp_path / "01_认识版本控制.mp4"
+    copy = tmp_path / "01 认识版本控制.mp4"
+    original.write_bytes(b"same video content")
+    copy.write_bytes(b"same video content")
+
+    result = VideoImporter().import_paths([str(original), str(copy)])
+
+    assert len(result.added) == 1
+    assert result.duplicates == [copy.resolve()]
+
+
+def test_import_keeps_same_size_but_different_content(tmp_path: Path) -> None:
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    first.write_bytes(b"a" * 2048)
+    second.write_bytes(b"b" * 2048)
+
+    result = VideoImporter().import_paths([str(first), str(second)])
+
+    assert len(result.added) == 2
+    assert result.duplicates == []
+
+
 def test_import_reports_unsupported_and_missing_files(tmp_path: Path) -> None:
     unsupported = tmp_path / "notes.txt"
     unsupported.write_text("not a video", encoding="utf-8")

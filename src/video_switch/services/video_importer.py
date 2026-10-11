@@ -1,5 +1,6 @@
 """Validate and convert filesystem paths into media tasks."""
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ SUPPORTED_VIDEO_EXTENSIONS = frozenset(
         ".wmv",
     }
 )
+CONTENT_SAMPLE_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,24 @@ def format_file_size(size_bytes: int) -> str:
     return f"{size:.1f} TB"
 
 
+def content_signature(path: Path, size_bytes: int) -> str:
+    """Build a fast content fingerprint from size and sampled file regions."""
+    sample_size = CONTENT_SAMPLE_BYTES
+    offsets = {0}
+    if size_bytes > sample_size:
+        offsets.add(max(0, size_bytes // 2 - sample_size // 2))
+        offsets.add(max(0, size_bytes - sample_size))
+
+    digest = hashlib.sha256()
+    digest.update(size_bytes.to_bytes(8, "big"))
+    with path.open("rb") as file:
+        for offset in sorted(offsets):
+            file.seek(offset)
+            digest.update(offset.to_bytes(8, "big"))
+            digest.update(file.read(sample_size))
+    return digest.hexdigest()
+
+
 class VideoImporter:
     """Turn file paths into validated media tasks."""
 
@@ -64,9 +84,11 @@ class VideoImporter:
         self,
         paths: list[str] | tuple[str, ...],
         existing_keys: set[str] | None = None,
+        existing_signatures: set[str] | None = None,
     ) -> ImportResult:
         result = ImportResult()
         seen_keys = set(existing_keys or ())
+        seen_signatures = set(existing_signatures or ())
         seen_request_keys: set[str] = set()
 
         for raw_path in paths:
@@ -92,17 +114,24 @@ class VideoImporter:
 
             try:
                 size_bytes = resolved.stat().st_size
+                signature = content_signature(resolved, size_bytes)
             except OSError:
                 result.issues.append(ImportIssue(resolved, "无法读取文件信息"))
+                continue
+
+            if signature in seen_signatures:
+                result.duplicates.append(resolved)
                 continue
 
             task = MediaTask(
                 path=resolved,
                 size_bytes=size_bytes,
+                content_signature=signature,
                 imported_at=datetime.now(),
             )
             result.added.append(task)
             seen_keys.add(task.key)
             seen_request_keys.add(key)
+            seen_signatures.add(signature)
 
         return result

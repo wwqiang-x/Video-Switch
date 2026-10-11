@@ -99,6 +99,34 @@ QDialog {{
     background: {palette.app_bg};
 }}
 
+QMessageBox {{
+    background: {palette.surface};
+}}
+
+QMessageBox QLabel {{
+    color: {palette.text};
+}}
+
+QMessageBox QPushButton {{
+    background: {palette.surface_alt};
+    border: 1px solid {palette.border_strong};
+    border-radius: 6px;
+    color: {palette.text};
+    min-height: 30px;
+    min-width: 78px;
+    padding: 0 14px;
+}}
+
+QMessageBox QPushButton:hover {{
+    background: {palette.surface_hover};
+}}
+
+QMessageBox QPushButton:default {{
+    background: {palette.primary};
+    border-color: {palette.primary};
+    color: #ffffff;
+}}
+
 QFrame#Header,
 QFrame#Footer {{
     background: {palette.surface};

@@ -557,7 +557,11 @@ class MainWindow(QMainWindow):
         self._import_paths(paths)
 
     def _import_paths(self, paths: list[str]) -> None:
-        result = self.importer.import_paths(paths, set(self.tasks))
+        result = self.importer.import_paths(
+            paths,
+            set(self.tasks),
+            {task.content_signature for task in self.tasks.values()},
+        )
         first_item: QListWidgetItem | None = None
         for task in result.added:
             item = self._create_task_item(task)
@@ -679,14 +683,15 @@ class MainWindow(QMainWindow):
         del checked
         if not self.tasks:
             return
-        answer = QMessageBox.question(
-            self,
-            "清空任务",
-            f"确定要移除队列中的 {len(self.tasks)} 个任务吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("清空任务")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(f"确定要移除队列中的 {len(self.tasks)} 个任务吗？")
+        clear_button = dialog.addButton("清空", QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        if dialog.clickedButton() is not clear_button:
             return
         self.tasks.clear()
         self.task_list.clear()
