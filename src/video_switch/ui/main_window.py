@@ -3,7 +3,15 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QPainter, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QFontMetrics,
+    QIcon,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -105,6 +113,34 @@ class MetricItem(QWidget):
 
         layout.addWidget(caption)
         layout.addWidget(self.value_label)
+
+
+class ElidedLabel(QLabel):
+    """A single-line label that elides long text in the middle."""
+
+    def __init__(self, text: str = "") -> None:
+        super().__init__()
+        self._full_text = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self.setToolTip(text)
+        self.refresh_elide()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.refresh_elide()
+
+    def refresh_elide(self) -> None:
+        width = max(0, self.contentsRect().width())
+        displayed = QFontMetrics(self.font()).elidedText(
+            self._full_text,
+            Qt.TextElideMode.ElideMiddle,
+            width,
+        )
+        super().setText(displayed)
 
 
 class ThumbnailLabel(QLabel):
@@ -411,7 +447,7 @@ class MainWindow(QMainWindow):
         self.preview_icon.setObjectName("StageIcon")
         self.preview_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.preview_title = QLabel("拖入视频文件")
+        self.preview_title = ElidedLabel("拖入视频文件")
         self.preview_title.setObjectName("PreviewTitle")
         self.preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_title.setWordWrap(True)
@@ -1113,6 +1149,7 @@ class MainWindow(QMainWindow):
         palette = get_palette(self.theme_name)
         self.setStyleSheet(build_stylesheet(palette))
         self._apply_icon_theme(palette)
+        self.preview_title.refresh_elide()
         target = "浅色" if palette.name == "dark" else "深色"
         self.theme_button.setToolTip(f"切换为{target}主题")
 

@@ -9,8 +9,9 @@ from PySide6.QtCore import QObject, QProcess, QStandardPaths, QTimer, Signal
 
 from video_switch.models.media_task import MediaTask
 
-THUMBNAIL_WIDTH = 640
+THUMBNAIL_WIDTH = 1280
 THUMBNAIL_TIMEOUT_MS = 20_000
+THUMBNAIL_CACHE_VERSION = "v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +61,7 @@ def thumbnail_positions(duration_seconds: float | None) -> tuple[float, ...]:
 
 def thumbnail_cache_path(cache_dir: Path, content_signature: str) -> Path:
     """Return a stable cache path derived from the content fingerprint."""
-    return cache_dir / f"{content_signature}.jpg"
+    return cache_dir / f"{THUMBNAIL_CACHE_VERSION}-{content_signature}.jpg"
 
 
 class ThumbnailService(QObject):
@@ -133,6 +134,7 @@ class ThumbnailService(QObject):
     def delete_cached(self, content_signature: str) -> None:
         """Delete one cached thumbnail if it exists."""
         thumbnail_cache_path(self.cache_dir, content_signature).unlink(missing_ok=True)
+        (self.cache_dir / f"{content_signature}.jpg").unlink(missing_ok=True)
 
     def _start_next(self) -> None:
         if self._current is not None or not self._queue:
@@ -181,7 +183,7 @@ class ThumbnailService(QObject):
                 "-vf",
                 (f"scale={THUMBNAIL_WIDTH}:-2:force_original_aspect_ratio=decrease"),
                 "-q:v",
-                "3",
+                "2",
                 "-y",
                 str(output_path),
             ],
