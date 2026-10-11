@@ -294,6 +294,12 @@ QPushButton#SecondaryAction:hover {{
     background: {palette.surface_hover};
 }}
 
+QPushButton#SecondaryAction:disabled {{
+    background: {palette.surface_alt};
+    border-color: {palette.border};
+    color: {palette.muted};
+}}
+
 QToolButton#IconButton {{
     background: transparent;
     border: 1px solid transparent;

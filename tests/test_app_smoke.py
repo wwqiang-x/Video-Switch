@@ -31,6 +31,7 @@ def test_initial_shell_state(qtbot) -> None:
     assert window.format_buttons["MP4"].isChecked()
     assert window.task_stack.currentIndex() == 0
     assert window.start_button.isEnabled() is False
+    assert window.regenerate_thumbnail_button.isHidden() is True
     assert window.media_status.text() == "未选择"
 
 

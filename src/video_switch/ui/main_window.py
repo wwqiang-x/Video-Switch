@@ -390,6 +390,7 @@ class MainWindow(QMainWindow):
         self.regenerate_thumbnail_button.setObjectName("IconButton")
         self.regenerate_thumbnail_button.setToolTip("重新生成缩略图")
         self.regenerate_thumbnail_button.setEnabled(False)
+        self.regenerate_thumbnail_button.hide()
         self.regenerate_thumbnail_button.clicked.connect(self._regenerate_thumbnail)
         heading.addWidget(title)
         heading.addStretch(1)
@@ -419,11 +420,23 @@ class MainWindow(QMainWindow):
         self.preview_hint.setObjectName("PreviewHint")
         self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_hint.setWordWrap(True)
+        self.preview_hint.setMinimumWidth(320)
+
+        preview_message = QWidget()
+        preview_message.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        preview_message_layout = QVBoxLayout(preview_message)
+        preview_message_layout.setContentsMargins(0, 0, 0, 0)
+        preview_message_layout.setSpacing(7)
+        preview_message_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_message_layout.addWidget(self.preview_icon)
+        preview_message_layout.addWidget(self.preview_title)
+        preview_message_layout.addWidget(self.preview_hint)
 
         preview_layout.addWidget(self.thumbnail_label, 1)
-        preview_layout.addWidget(self.preview_icon)
-        preview_layout.addWidget(self.preview_title)
-        preview_layout.addWidget(self.preview_hint)
+        preview_layout.addWidget(preview_message)
 
         metrics = QWidget()
         metrics_layout = QGridLayout(metrics)
@@ -759,6 +772,7 @@ class MainWindow(QMainWindow):
 
         self._apply_thumbnail_to_preview(task)
         self.preview_hint.setToolTip(task.probe_error or task.thumbnail_error or "")
+        self.regenerate_thumbnail_button.setVisible(info is not None)
         self.regenerate_thumbnail_button.setEnabled(info is not None)
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("视频转换将在步骤 7 接入")
@@ -802,6 +816,7 @@ class MainWindow(QMainWindow):
         self.thumbnail_label.clear_source_pixmap()
         self.thumbnail_label.hide()
         self.preview_icon.show()
+        self.regenerate_thumbnail_button.hide()
         self.regenerate_thumbnail_button.setEnabled(False)
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("请先导入视频")
