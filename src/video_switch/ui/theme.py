@@ -239,6 +239,11 @@ QLabel#PreviewHint {{
     color: {palette.preview_muted};
 }}
 
+QLabel#ThumbnailPreview {{
+    background: transparent;
+    border: none;
+}}
+
 QFrame#PreviewStage {{
     background: {palette.preview_bg};
     border: 1px solid {palette.border_strong};

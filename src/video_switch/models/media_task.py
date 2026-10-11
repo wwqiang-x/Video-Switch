@@ -31,6 +31,9 @@ class MediaTask:
     media_info: MediaInfo | None = None
     probe_error: str | None = None
     raw_probe_output: str | None = None
+    thumbnail_path: Path | None = None
+    thumbnail_error: str | None = None
+    thumbnail_generating: bool = False
 
     @property
     def display_name(self) -> str:

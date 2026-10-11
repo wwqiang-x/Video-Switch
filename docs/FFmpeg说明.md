@@ -40,6 +40,17 @@ ffprobe -v error -print_format json -show_format -show_streams input.mp4
 应用会解析视频流和音频流，提取时长、分辨率、帧率、编码、码率、采样率和
 声道数。读取失败时不会终止其他任务。
 
+## 缩略图生成
+
+应用使用 ffmpeg 从指定时间点截取一帧，并缩放到适合预览的宽度：
+
+```powershell
+ffmpeg -ss 10 -i input.mp4 -frames:v 1 -vf "scale=640:-2" -q:v 3 thumbnail.jpg
+```
+
+如果首个位置截取失败，应用会依次尝试第 1 秒、视频中段、结尾和首帧。
+生成的图片保存在应用缓存目录，不修改源视频。
+
 ## 面试需要掌握的概念
 
 - MP4、MKV、WebM 是容器格式。

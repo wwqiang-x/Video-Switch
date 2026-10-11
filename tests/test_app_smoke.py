@@ -1,11 +1,12 @@
 """Smoke tests for the desktop entry point and main interface shell."""
 
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
-from PySide6.QtGui import QDropEvent
+from PySide6.QtGui import QDropEvent, QPixmap
 
 from video_switch import main
 from video_switch.models.media_info import MediaInfo
 from video_switch.services.media_probe import ProbeResult
+from video_switch.services.thumbnail import ThumbnailResult
 from video_switch.ui.main_window import MainWindow
 
 
@@ -113,3 +114,23 @@ def test_probe_result_updates_selected_task(qtbot, tmp_path) -> None:
     assert window.metric_frame_rate.value_label.text() == "30 FPS"
     assert window.metric_audio_codec.value_label.text() == "AAC · 2 声道"
     assert window.metric_container.value_label.text() == "MP4"
+
+
+def test_thumbnail_result_updates_preview(qtbot, tmp_path) -> None:
+    video = tmp_path / "thumbnail.mp4"
+    video.write_bytes(b"video")
+    thumbnail = tmp_path / "thumbnail.png"
+    pixmap = QPixmap(64, 36)
+    pixmap.fill(Qt.GlobalColor.blue)
+    assert pixmap.save(str(thumbnail))
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window._import_paths([str(video)])
+    task_key = next(iter(window.tasks))
+    window._on_task_thumbnail_started(task_key)
+    window._on_task_thumbnail_finished(ThumbnailResult(task_key=task_key, thumbnail_path=thumbnail))
+
+    assert window.thumbnail_label.isHidden() is False
+    assert window.thumbnail_label.pixmap().isNull() is False
+    assert window.preview_hint.text() == "缩略图已生成"

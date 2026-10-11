@@ -33,6 +33,11 @@ from PySide6.QtWidgets import (
 
 from video_switch.models.media_task import MediaTask, TaskStatus
 from video_switch.services.media_probe import MediaProbeService, ProbeResult
+from video_switch.services.thumbnail import (
+    ThumbnailResult,
+    ThumbnailService,
+    default_thumbnail_cache_dir,
+)
 from video_switch.services.toolchain import ToolchainDetector, ToolchainStatus
 from video_switch.services.video_importer import (
     ImportResult,
@@ -102,6 +107,41 @@ class MetricItem(QWidget):
         layout.addWidget(self.value_label)
 
 
+class ThumbnailLabel(QLabel):
+    """A label that keeps an image centered and scales it on resize."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("ThumbnailPreview")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(320, 180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._source_pixmap = QPixmap()
+
+    def set_source_pixmap(self, pixmap: QPixmap) -> None:
+        self._source_pixmap = pixmap
+        self._refresh_pixmap()
+
+    def clear_source_pixmap(self) -> None:
+        self._source_pixmap = QPixmap()
+        self.clear()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_pixmap()
+
+    def _refresh_pixmap(self) -> None:
+        if self._source_pixmap.isNull():
+            return
+        self.setPixmap(
+            self._source_pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+
 class CollapsibleSection(QWidget):
     """A lightweight expandable settings section."""
 
@@ -152,6 +192,12 @@ class MainWindow(QMainWindow):
         self.probe_service = MediaProbeService(self)
         self.probe_service.task_started.connect(self._on_task_probe_started)
         self.probe_service.task_finished.connect(self._on_task_probe_finished)
+        self.thumbnail_service = ThumbnailService(
+            default_thumbnail_cache_dir(),
+            self,
+        )
+        self.thumbnail_service.task_started.connect(self._on_task_thumbnail_started)
+        self.thumbnail_service.task_finished.connect(self._on_task_thumbnail_finished)
         self.toolchain_detector = ToolchainDetector(self)
         self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
         self.toolchain_detector.finished.connect(self._on_toolchain_detected)
@@ -340,8 +386,14 @@ class MainWindow(QMainWindow):
         title.setObjectName("PanelTitle")
         self.media_status = QLabel("未选择")
         self.media_status.setObjectName("StatusChip")
+        self.regenerate_thumbnail_button = QToolButton()
+        self.regenerate_thumbnail_button.setObjectName("IconButton")
+        self.regenerate_thumbnail_button.setToolTip("重新生成缩略图")
+        self.regenerate_thumbnail_button.setEnabled(False)
+        self.regenerate_thumbnail_button.clicked.connect(self._regenerate_thumbnail)
         heading.addWidget(title)
         heading.addStretch(1)
+        heading.addWidget(self.regenerate_thumbnail_button)
         heading.addWidget(self.media_status)
 
         self.preview_stage = QFrame()
@@ -350,6 +402,9 @@ class MainWindow(QMainWindow):
         preview_layout = QVBoxLayout(self.preview_stage)
         preview_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_layout.setSpacing(8)
+
+        self.thumbnail_label = ThumbnailLabel()
+        self.thumbnail_label.hide()
 
         self.preview_icon = QLabel()
         self.preview_icon.setObjectName("StageIcon")
@@ -365,6 +420,7 @@ class MainWindow(QMainWindow):
         self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_hint.setWordWrap(True)
 
+        preview_layout.addWidget(self.thumbnail_label, 1)
         preview_layout.addWidget(self.preview_icon)
         preview_layout.addWidget(self.preview_title)
         preview_layout.addWidget(self.preview_hint)
@@ -551,7 +607,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 4")
+        stage_label = QLabel("开发阶段 · 步骤 5")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -690,7 +746,7 @@ class MainWindow(QMainWindow):
             self.preview_hint.setText("正在读取视频信息...")
         elif task.status == TaskStatus.METADATA_READY:
             self.media_status.setText("信息已读取")
-            self.preview_hint.setText("缩略图将在步骤 5 生成")
+            self.preview_hint.setText("等待生成缩略图")
         elif task.status == TaskStatus.FAILED:
             self.media_status.setText("读取失败")
             self.preview_hint.setText(task.probe_error or "无法读取视频信息")
@@ -701,9 +757,30 @@ class MainWindow(QMainWindow):
             else:
                 self.preview_hint.setText("请先在设置中配置 ffprobe 环境")
 
-        self.preview_hint.setToolTip(task.probe_error or "")
+        self._apply_thumbnail_to_preview(task)
+        self.preview_hint.setToolTip(task.probe_error or task.thumbnail_error or "")
+        self.regenerate_thumbnail_button.setEnabled(info is not None)
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("视频转换将在步骤 7 接入")
+
+    def _apply_thumbnail_to_preview(self, task: MediaTask) -> None:
+        thumbnail_path = task.thumbnail_path
+        if thumbnail_path is not None and thumbnail_path.is_file():
+            pixmap = QPixmap(str(thumbnail_path))
+            if not pixmap.isNull():
+                self.thumbnail_label.set_source_pixmap(pixmap)
+                self.thumbnail_label.show()
+                self.preview_icon.hide()
+                self.preview_hint.setText("缩略图已生成")
+                return
+
+        self.thumbnail_label.clear_source_pixmap()
+        self.thumbnail_label.hide()
+        self.preview_icon.show()
+        if task.thumbnail_generating:
+            self.preview_hint.setText("正在生成缩略图...")
+        elif task.thumbnail_error:
+            self.preview_hint.setText(f"缩略图生成失败：{task.thumbnail_error}")
 
     def _clear_preview(self) -> None:
         self.media_status.setText("未选择")
@@ -722,6 +799,10 @@ class MainWindow(QMainWindow):
         self.preview_title.setToolTip("")
         self.preview_hint.setText("或点击右上角“添加视频”")
         self.preview_hint.setToolTip("")
+        self.thumbnail_label.clear_source_pixmap()
+        self.thumbnail_label.hide()
+        self.preview_icon.show()
+        self.regenerate_thumbnail_button.setEnabled(False)
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("请先导入视频")
 
@@ -737,6 +818,72 @@ class MainWindow(QMainWindow):
         if self.toolchain_status is None or not self.toolchain_status.ffprobe.ready:
             return None
         return self.toolchain_status.ffprobe.executable
+
+    def _available_ffmpeg_path(self) -> Path | None:
+        if self.toolchain_status is None or not self.toolchain_status.ffmpeg.ready:
+            return None
+        return self.toolchain_status.ffmpeg.executable
+
+    def _queue_thumbnails_for_ready_tasks(self) -> None:
+        for task in self.tasks.values():
+            if task.status == TaskStatus.METADATA_READY:
+                self._queue_thumbnail_for_task(task)
+
+    def _queue_thumbnail_for_task(
+        self,
+        task: MediaTask,
+        force: bool = False,
+    ) -> None:
+        ffmpeg_path = self._available_ffmpeg_path()
+        if ffmpeg_path is None or task.media_info is None:
+            return
+        if task.thumbnail_generating:
+            return
+        if task.thumbnail_path is not None and task.thumbnail_path.is_file() and not force:
+            if self._current_task_key() == task.key:
+                self._apply_task_to_preview(task)
+            return
+        if task.thumbnail_error and not force:
+            return
+
+        if force:
+            self.thumbnail_service.delete_cached(task.content_signature)
+            task.thumbnail_path = None
+            task.thumbnail_error = None
+
+        self.thumbnail_service.enqueue(task, ffmpeg_path)
+
+    def _on_task_thumbnail_started(self, task_key: str) -> None:
+        task = self.tasks.get(task_key)
+        if task is None:
+            return
+        task.thumbnail_generating = True
+        task.thumbnail_error = None
+        if self._current_task_key() == task_key:
+            self._apply_task_to_preview(task)
+
+    def _on_task_thumbnail_finished(self, result: ThumbnailResult) -> None:
+        task = self.tasks.get(result.task_key)
+        if task is None:
+            return
+        task.thumbnail_generating = False
+        if result.thumbnail_path is not None:
+            task.thumbnail_path = result.thumbnail_path
+            task.thumbnail_error = None
+        else:
+            task.thumbnail_path = None
+            task.thumbnail_error = result.error or "无法生成缩略图"
+        if self._current_task_key() == task.key:
+            self._apply_task_to_preview(task)
+
+    def _regenerate_thumbnail(self) -> None:
+        task_key = self._current_task_key()
+        if task_key is None:
+            return
+        task = self.tasks.get(task_key)
+        if task is None or task.media_info is None:
+            return
+        self._queue_thumbnail_for_task(task, force=True)
 
     def _on_task_probe_started(self, task_key: str) -> None:
         task = self.tasks.get(task_key)
@@ -758,6 +905,7 @@ class MainWindow(QMainWindow):
             task.media_info = result.info
             task.probe_error = None
             task.status = TaskStatus.METADATA_READY
+            self._queue_thumbnail_for_task(task)
         else:
             task.media_info = None
             task.probe_error = result.error or "无法读取视频信息"
@@ -791,9 +939,12 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         task_key = str(item.data(Qt.ItemDataRole.UserRole))
-        self.tasks.pop(task_key, None)
+        task = self.tasks.pop(task_key, None)
         self.task_items.pop(task_key, None)
         self.probe_service.cancel_task(task_key)
+        self.thumbnail_service.cancel_task(task_key)
+        if task is not None:
+            self.thumbnail_service.delete_cached(task.content_signature)
         self.task_list.takeItem(self.task_list.row(item))
         self._update_task_actions()
         self._show_footer_message("已移除所选任务", timeout=4000)
@@ -813,6 +964,9 @@ class MainWindow(QMainWindow):
         if dialog.clickedButton() is not clear_button:
             return
         self.probe_service.cancel_all()
+        self.thumbnail_service.cancel_all()
+        for task in self.tasks.values():
+            self.thumbnail_service.delete_cached(task.content_signature)
         self.tasks.clear()
         self.task_items.clear()
         self.task_list.clear()
@@ -911,6 +1065,7 @@ class MainWindow(QMainWindow):
         ]
         self.footer_status_label.setToolTip("\n".join(details))
         self._probe_pending_tasks()
+        self._queue_thumbnails_for_ready_tasks()
 
     def _set_status_state(self, state: str) -> None:
         self.status_dot.setProperty("state", state)
@@ -988,6 +1143,13 @@ class MainWindow(QMainWindow):
         )
         self.start_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_MediaPlay, palette.text)
+        )
+        self.regenerate_thumbnail_button.setIcon(
+            _colored_icon(
+                self,
+                QStyle.StandardPixmap.SP_BrowserReload,
+                palette.text,
+            )
         )
         task_icon = self._task_icon()
         for index in range(self.task_list.count()):
