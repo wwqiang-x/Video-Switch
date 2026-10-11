@@ -1,19 +1,25 @@
 """Main desktop window and step-one interface shell."""
 
-from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from pathlib import Path
+
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -25,12 +31,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from video_switch.models.media_task import MediaTask
 from video_switch.services.toolchain import ToolchainDetector, ToolchainStatus
+from video_switch.services.video_importer import (
+    ImportResult,
+    VideoImporter,
+    format_file_size,
+)
 from video_switch.ui.fonts import register_cjk_fonts
 from video_switch.ui.settings_dialog import SettingsDialog
 from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 
 APP_NAME = "Video Switch"
+VIDEO_FILE_FILTER = (
+    "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
+    "所有文件 (*)"
+)
 
 
 def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap) -> QIcon:
@@ -126,6 +142,11 @@ class MainWindow(QMainWindow):
         register_cjk_fonts()
         self.settings = QSettings("VideoSwitch", "Video Switch")
         self.theme_name = str(self.settings.value("ui/theme", "light"))
+        self.importer = VideoImporter()
+        self.tasks: dict[str, MediaTask] = {}
+        self._footer_reset_timer = QTimer(self)
+        self._footer_reset_timer.setSingleShot(True)
+        self._footer_reset_timer.timeout.connect(self._restore_toolchain_status)
         self.toolchain_detector = ToolchainDetector(self)
         self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
         self.toolchain_detector.finished.connect(self._on_toolchain_detected)
@@ -134,6 +155,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} - 视频转换器")
         self.resize(1280, 800)
         self.setMinimumSize(1080, 680)
+        self.setAcceptDrops(True)
 
         self._build_interface()
         self._apply_theme()
@@ -206,14 +228,13 @@ class MainWindow(QMainWindow):
         self.add_video_button = QPushButton("添加视频")
         self.add_video_button.setObjectName("PrimaryAction")
         self.add_video_button.setIcon(_icon(self, QStyle.StandardPixmap.SP_DialogOpenButton))
-        self.add_video_button.clicked.connect(
-            lambda: self._show_footer_message("视频导入将在步骤 3 接入")
-        )
+        self.add_video_button.clicked.connect(self._choose_videos)
 
         self.clear_button = QToolButton()
         self.clear_button.setObjectName("IconButton")
-        self.clear_button.setToolTip("清空任务")
+        self.clear_button.setToolTip("清空全部任务")
         self.clear_button.setEnabled(False)
+        self.clear_button.clicked.connect(self._clear_queue)
 
         self.theme_button = QToolButton()
         self.theme_button.setObjectName("IconButton")
@@ -252,18 +273,32 @@ class MainWindow(QMainWindow):
         heading.addWidget(self.queue_count)
 
         self.task_list = QListWidget()
+        self.task_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.task_list.currentItemChanged.connect(self._on_task_selected)
         self.task_stack = QStackedWidget()
         self.task_stack.addWidget(self._build_empty_queue())
         self.task_stack.addWidget(self.task_list)
         self.task_stack.setCurrentIndex(0)
 
-        clear_finished = QPushButton("清空已完成")
-        clear_finished.setObjectName("SecondaryAction")
-        clear_finished.setEnabled(False)
+        self.remove_button = QPushButton("移除选中")
+        self.remove_button.setObjectName("SecondaryAction")
+        self.remove_button.setEnabled(False)
+        self.remove_button.clicked.connect(self._remove_selected_task)
+
+        self.clear_queue_button = QPushButton("清空全部")
+        self.clear_queue_button.setObjectName("SecondaryAction")
+        self.clear_queue_button.setEnabled(False)
+        self.clear_queue_button.clicked.connect(self._clear_queue)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(self.remove_button)
+        actions.addWidget(self.clear_queue_button)
 
         layout.addLayout(heading)
         layout.addWidget(self.task_stack, 1)
-        layout.addWidget(clear_finished)
+        layout.addLayout(actions)
         return panel
 
     def _build_empty_queue(self) -> QWidget:
@@ -315,17 +350,18 @@ class MainWindow(QMainWindow):
         self.preview_icon.setObjectName("StageIcon")
         self.preview_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        preview_title = QLabel("拖入视频文件")
-        preview_title.setObjectName("PreviewTitle")
-        preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_title = QLabel("拖入视频文件")
+        self.preview_title.setObjectName("PreviewTitle")
+        self.preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_title.setWordWrap(True)
 
-        preview_hint = QLabel("或点击右上角“添加视频”")
-        preview_hint.setObjectName("PreviewHint")
-        preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_hint = QLabel("或点击右上角“添加视频”")
+        self.preview_hint.setObjectName("PreviewHint")
+        self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         preview_layout.addWidget(self.preview_icon)
-        preview_layout.addWidget(preview_title)
-        preview_layout.addWidget(preview_hint)
+        preview_layout.addWidget(self.preview_title)
+        preview_layout.addWidget(self.preview_hint)
 
         metrics = QWidget()
         metrics_layout = QHBoxLayout(metrics)
@@ -498,7 +534,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 2")
+        stage_label = QLabel("开发阶段 · 步骤 3")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -507,8 +543,215 @@ class MainWindow(QMainWindow):
         layout.addWidget(stage_label)
         return footer
 
-    def _show_footer_message(self, message: str) -> None:
+    def _choose_videos(self) -> None:
+        last_directory = str(self.settings.value("files/last_import_directory", ""))
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择视频文件",
+            last_directory,
+            VIDEO_FILE_FILTER,
+        )
+        if not paths:
+            return
+        self.settings.setValue("files/last_import_directory", str(Path(paths[0]).parent))
+        self._import_paths(paths)
+
+    def _import_paths(self, paths: list[str]) -> None:
+        result = self.importer.import_paths(paths, set(self.tasks))
+        first_item: QListWidgetItem | None = None
+        for task in result.added:
+            item = self._create_task_item(task)
+            self.tasks[task.key] = task
+            if first_item is None:
+                first_item = item
+
+        self._update_task_actions()
+        if first_item is not None:
+            self.task_list.setCurrentItem(first_item)
+
+        message, details, state = self._import_feedback(result)
+        self._show_footer_message(
+            message,
+            details=details,
+            state=state,
+            timeout=6000,
+        )
+
+    def _create_task_item(self, task: MediaTask) -> QListWidgetItem:
+        item = QListWidgetItem(
+            f"{task.display_name}\n"
+            f"{task.extension}  ·  {format_file_size(task.size_bytes)}  ·  {task.status_text}"
+        )
+        item.setData(Qt.ItemDataRole.UserRole, task.key)
+        item.setToolTip(str(task.path))
+        item.setSizeHint(QSize(0, 62))
+        item.setIcon(self._task_icon())
+        self.task_list.addItem(item)
+        return item
+
+    def _task_icon(self) -> QIcon:
+        palette = get_palette(self.theme_name)
+        return _colored_icon(
+            self,
+            QStyle.StandardPixmap.SP_FileIcon,
+            palette.primary,
+            24,
+        )
+
+    def _import_feedback(self, result: ImportResult) -> tuple[str, str, str]:
+        parts: list[str] = []
+        if result.added:
+            parts.append(f"已导入 {len(result.added)} 个视频")
+        if result.duplicates:
+            parts.append(f"忽略 {len(result.duplicates)} 个重复文件")
+        if result.issues:
+            parts.append(f"{len(result.issues)} 个文件未导入")
+
+        if not parts:
+            return "没有可导入的文件", "", "error"
+
+        detail_lines = [f"重复文件：{path}" for path in result.duplicates]
+        detail_lines.extend(f"{issue.path}：{issue.reason}" for issue in result.issues)
+
+        if result.added and result.skipped_count == 0:
+            state = "ready"
+        elif result.added:
+            state = "pending"
+        else:
+            state = "error"
+        return "；".join(parts), "\n".join(detail_lines), state
+
+    def _on_task_selected(
+        self,
+        current: QListWidgetItem | None,
+        previous: QListWidgetItem | None,
+    ) -> None:
+        del previous
+        if current is None:
+            self._clear_preview()
+            self._update_task_actions()
+            return
+
+        task_key = str(current.data(Qt.ItemDataRole.UserRole))
+        task = self.tasks.get(task_key)
+        if task is None:
+            self._clear_preview()
+            self._update_task_actions()
+            return
+
+        self.media_status.setText("已导入")
+        self.metric_duration.value_label.setText("--")
+        self.metric_resolution.value_label.setText("--")
+        self.metric_video_codec.value_label.setText("--")
+        self.metric_file_size.value_label.setText(format_file_size(task.size_bytes))
+        self.source_path.setText(str(task.path))
+        self.preview_title.setText(task.display_name)
+        self.preview_title.setToolTip(task.display_name)
+        self.preview_hint.setText("视频信息将在步骤 4 读取")
+        self.start_button.setEnabled(False)
+        self.start_button.setToolTip("视频转换将在步骤 7 接入")
+        self._update_task_actions()
+
+    def _clear_preview(self) -> None:
+        self.media_status.setText("未选择")
+        self.metric_duration.value_label.setText("--")
+        self.metric_resolution.value_label.setText("--")
+        self.metric_video_codec.value_label.setText("--")
+        self.metric_file_size.value_label.setText("--")
+        self.source_path.setText("尚未导入视频")
+        self.preview_title.setText("拖入视频文件")
+        self.preview_title.setToolTip("")
+        self.preview_hint.setText("或点击右上角“添加视频”")
+        self.start_button.setEnabled(False)
+        self.start_button.setToolTip("请先导入视频")
+
+    def _remove_selected_task(self) -> None:
+        item = self.task_list.currentItem()
+        if item is None:
+            return
+        task_key = str(item.data(Qt.ItemDataRole.UserRole))
+        self.tasks.pop(task_key, None)
+        self.task_list.takeItem(self.task_list.row(item))
+        self._update_task_actions()
+        self._show_footer_message("已移除所选任务", timeout=4000)
+
+    def _clear_queue(self, checked: bool = False) -> None:
+        del checked
+        if not self.tasks:
+            return
+        answer = QMessageBox.question(
+            self,
+            "清空任务",
+            f"确定要移除队列中的 {len(self.tasks)} 个任务吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.tasks.clear()
+        self.task_list.clear()
+        self._update_task_actions()
+        self._show_footer_message("任务队列已清空", timeout=4000)
+
+    def _update_task_actions(self) -> None:
+        has_tasks = bool(self.tasks)
+        has_selection = self.task_list.currentItem() is not None
+        self.queue_count.setText(str(len(self.tasks)))
+        self.task_stack.setCurrentIndex(1 if has_tasks else 0)
+        self.clear_button.setEnabled(has_tasks)
+        self.remove_button.setEnabled(has_selection)
+        self.clear_queue_button.setEnabled(has_tasks)
+
+    def _show_footer_message(
+        self,
+        message: str,
+        details: str = "",
+        state: str | None = None,
+        timeout: int = 0,
+    ) -> None:
         self.footer_status_label.setText(message)
+        self.footer_status_label.setToolTip(details)
+        if state is not None:
+            self._set_status_state(state)
+        if timeout:
+            self._footer_reset_timer.start(timeout)
+
+    def _restore_toolchain_status(self) -> None:
+        if self.toolchain_status is not None:
+            self._on_toolchain_detected(self.toolchain_status)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._drop_paths(event.mimeData()):
+            event.acceptProposedAction()
+            self._set_drag_active(True)
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        del event
+        self._set_drag_active(False)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._set_drag_active(False)
+        paths = self._drop_paths(event.mimeData())
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._import_paths(paths)
+
+    @staticmethod
+    def _drop_paths(mime_data) -> list[str]:
+        if not mime_data.hasUrls():
+            return []
+        return [
+            url.toLocalFile() for url in mime_data.urls() if url.isLocalFile() and url.toLocalFile()
+        ]
+
+    def _set_drag_active(self, active: bool) -> None:
+        self.preview_stage.setProperty("dragActive", active)
+        self.preview_stage.style().unpolish(self.preview_stage)
+        self.preview_stage.style().polish(self.preview_stage)
 
     def _detect_toolchain(self) -> None:
         configured_ffmpeg = str(self.settings.value("toolchain/ffmpeg_path", ""))
@@ -619,3 +862,6 @@ class MainWindow(QMainWindow):
         self.start_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_MediaPlay, palette.text)
         )
+        task_icon = self._task_icon()
+        for index in range(self.task_list.count()):
+            self.task_list.item(index).setIcon(task_icon)

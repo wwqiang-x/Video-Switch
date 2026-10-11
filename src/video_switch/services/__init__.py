@@ -5,5 +5,12 @@ from video_switch.services.toolchain import (
     ToolchainStatus,
     ToolInfo,
 )
+from video_switch.services.video_importer import ImportResult, VideoImporter
 
-__all__ = ["ToolInfo", "ToolchainDetector", "ToolchainStatus"]
+__all__ = [
+    "ImportResult",
+    "ToolInfo",
+    "ToolchainDetector",
+    "ToolchainStatus",
+    "VideoImporter",
+]

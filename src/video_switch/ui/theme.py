@@ -217,6 +217,10 @@ QFrame#PreviewStage {{
     border-radius: 8px;
 }}
 
+QFrame#PreviewStage[dragActive="true"] {{
+    border: 2px solid {palette.primary};
+}}
+
 QFrame#SourcePathRow {{
     background: {palette.surface_alt};
     border: 1px solid {palette.border};
