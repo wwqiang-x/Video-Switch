@@ -1,0 +1,37 @@
+[project]
+name = "video-switch"
+version = "0.1.0"
+description = "A desktop video format converter powered by FFmpeg."
+authors = [
+    { name = "wwqiang-x", email = "769313140@qq.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pyside6-essentials>=6.12.0",
+]
+
+[project.scripts]
+video-switch = "video_switch:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = [".uv-cache"]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.22.3",
+    "pytest>=9.1.1",
+    "pytest-qt>=4.5.0",
+    "ruff>=0.17.0",
+]
