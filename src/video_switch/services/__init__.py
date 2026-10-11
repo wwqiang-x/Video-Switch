@@ -1,5 +1,10 @@
 """Application service layer."""
 
+from video_switch.services.ffmpeg_command import (
+    build_command_preview,
+    build_ffmpeg_args,
+    unique_output_path,
+)
 from video_switch.services.media_probe import MediaProbeService, ProbeResult
 from video_switch.services.thumbnail import (
     ThumbnailResult,
@@ -23,5 +28,8 @@ __all__ = [
     "ToolchainDetector",
     "ToolchainStatus",
     "VideoImporter",
+    "build_command_preview",
+    "build_ffmpeg_args",
     "default_thumbnail_cache_dir",
+    "unique_output_path",
 ]

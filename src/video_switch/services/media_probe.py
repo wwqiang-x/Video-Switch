@@ -142,6 +142,9 @@ class MediaProbeService(QObject):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._on_timeout)
+        self._next_timer = QTimer(self)
+        self._next_timer.setSingleShot(True)
+        self._next_timer.timeout.connect(self._start_next)
 
     def enqueue(self, task: MediaTask, ffprobe_path: Path) -> None:
         """Queue a task unless it is already pending or active."""
@@ -162,6 +165,7 @@ class MediaProbeService(QObject):
 
     def cancel_all(self) -> None:
         """Cancel all pending and active probe operations."""
+        self._next_timer.stop()
         self._queue.clear()
         self._queued_keys.clear()
         self._cancel_current()
@@ -283,7 +287,7 @@ class MediaProbeService(QObject):
         self._current = None
         self._process = None
         self.task_finished.emit(result)
-        QTimer.singleShot(0, self._start_next)
+        self._next_timer.start(0)
 
     def _cancel_current(self) -> None:
         self._timer.stop()

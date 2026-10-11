@@ -14,8 +14,8 @@ def test_main_is_callable() -> None:
     assert callable(main)
 
 
-def test_main_window_can_be_created(qtbot) -> None:
-    window = MainWindow()
+def test_main_window_can_be_created(qtbot, isolated_settings) -> None:
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
 
     assert "Video Switch" in window.windowTitle()
@@ -23,8 +23,8 @@ def test_main_window_can_be_created(qtbot) -> None:
     assert window.minimumHeight() == 680
 
 
-def test_initial_shell_state(qtbot) -> None:
-    window = MainWindow()
+def test_initial_shell_state(qtbot, isolated_settings) -> None:
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
 
     assert window.add_video_button.text() == "添加视频"
@@ -35,10 +35,14 @@ def test_initial_shell_state(qtbot) -> None:
     assert window.media_status.text() == "未选择"
 
 
-def test_importing_video_updates_queue_and_preview(qtbot, tmp_path) -> None:
+def test_importing_video_updates_queue_and_preview(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
     video = tmp_path / "sample video.mp4"
     video.write_bytes(b"video")
-    window = MainWindow()
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
 
     window._import_paths([str(video)])
@@ -51,10 +55,10 @@ def test_importing_video_updates_queue_and_preview(qtbot, tmp_path) -> None:
     assert window.source_path.text() == str(video.resolve())
 
 
-def test_remove_selected_task(qtbot, tmp_path) -> None:
+def test_remove_selected_task(qtbot, tmp_path, isolated_settings) -> None:
     video = tmp_path / "remove-me.mov"
     video.write_bytes(b"video")
-    window = MainWindow()
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
     window._import_paths([str(video)])
 
@@ -65,7 +69,11 @@ def test_remove_selected_task(qtbot, tmp_path) -> None:
     assert window.media_status.text() == "未选择"
 
 
-def test_drop_event_imports_local_video(qtbot, tmp_path) -> None:
+def test_drop_event_imports_local_video(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
     video = tmp_path / "dropped.webm"
     video.write_bytes(b"video")
     mime_data = QMimeData()
@@ -77,7 +85,7 @@ def test_drop_event_imports_local_video(qtbot, tmp_path) -> None:
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
     )
-    window = MainWindow()
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
 
     window.dropEvent(event)
@@ -86,10 +94,14 @@ def test_drop_event_imports_local_video(qtbot, tmp_path) -> None:
     assert window.source_path.text() == str(video.resolve())
 
 
-def test_probe_result_updates_selected_task(qtbot, tmp_path) -> None:
+def test_probe_result_updates_selected_task(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
     video = tmp_path / "metadata.mp4"
     video.write_bytes(b"video")
-    window = MainWindow()
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
     window._import_paths([str(video)])
     task_key = next(iter(window.tasks))
@@ -117,7 +129,11 @@ def test_probe_result_updates_selected_task(qtbot, tmp_path) -> None:
     assert window.metric_container.value_label.text() == "MP4"
 
 
-def test_thumbnail_result_updates_preview(qtbot, tmp_path) -> None:
+def test_thumbnail_result_updates_preview(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
     video = tmp_path / "thumbnail.mp4"
     video.write_bytes(b"video")
     thumbnail = tmp_path / "thumbnail.png"
@@ -125,7 +141,7 @@ def test_thumbnail_result_updates_preview(qtbot, tmp_path) -> None:
     pixmap.fill(Qt.GlobalColor.blue)
     assert pixmap.save(str(thumbnail))
 
-    window = MainWindow()
+    window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
     window._import_paths([str(video)])
     task_key = next(iter(window.tasks))

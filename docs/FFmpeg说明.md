@@ -53,6 +53,16 @@ ffmpeg -ss 10 -i input.mp4 -frames:v 1 -vf "scale='min(1920,iw)':-2" -q:v 1 thum
 缓存目录，不修改源视频。1080p 视频会生成完整 1920×1080 缩略图，720p
 视频保持 1280×720，不进行无意义的放大。
 
+## 转换命令预览
+
+步骤 6 会根据用户选择生成 FFmpeg 参数，但不会执行。例如 MP4 默认配置大致为：
+
+```powershell
+ffmpeg -y -i input.mp4 -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k -movflags +faststart output.mp4
+```
+
+WebM、MP3、WAV 和 GIF 会使用各自对应的编码参数和输出扩展名。
+
 ## 面试需要掌握的概念
 
 - MP4、MKV、WebM 是容器格式。

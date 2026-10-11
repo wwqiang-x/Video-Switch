@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -39,7 +40,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from video_switch.models.conversion_settings import (
+    AUDIO_CODEC_OPTIONS,
+    FORMAT_DEFAULTS,
+    VIDEO_CODEC_OPTIONS,
+    ConversionSettings,
+)
 from video_switch.models.media_task import MediaTask, TaskStatus
+from video_switch.services.ffmpeg_command import (
+    QUALITY_DEFAULTS,
+    build_command_preview,
+    unique_output_path,
+)
 from video_switch.services.media_probe import MediaProbeService, ProbeResult
 from video_switch.services.thumbnail import (
     ThumbnailResult,
@@ -214,14 +226,16 @@ class CollapsibleSection(QWidget):
 class MainWindow(QMainWindow):
     """Primary window for the video conversion workflow."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
         register_cjk_fonts()
-        self.settings = QSettings("VideoSwitch", "Video Switch")
+        self.settings = settings or QSettings("VideoSwitch", "Video Switch")
         self.theme_name = str(self.settings.value("ui/theme", "light"))
         self.importer = VideoImporter()
         self.tasks: dict[str, MediaTask] = {}
         self.task_items: dict[str, QListWidgetItem] = {}
+        self.output_directory: Path | None = None
+        self._loading_conversion_settings = True
         self._footer_reset_timer = QTimer(self)
         self._footer_reset_timer.setSingleShot(True)
         self._footer_reset_timer.timeout.connect(self._restore_toolchain_status)
@@ -245,6 +259,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._build_interface()
+        self._load_conversion_settings()
         self._apply_theme()
         QTimer.singleShot(0, self._detect_toolchain)
 
@@ -563,6 +578,7 @@ class MainWindow(QMainWindow):
             self.format_group.addButton(button)
             self.format_buttons[name] = button
             format_grid.addWidget(button, index // 3, index % 3)
+        self.format_group.buttonToggled.connect(self._on_format_changed)
 
         basic_form = QGridLayout()
         basic_form.setContentsMargins(0, 0, 0, 0)
@@ -570,10 +586,13 @@ class MainWindow(QMainWindow):
         basic_form.setVerticalSpacing(10)
         self.quality_combo = QComboBox()
         self.quality_combo.addItems(("平衡（推荐）", "高质量", "小体积"))
+        self.quality_combo.currentTextChanged.connect(self._on_quality_changed)
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(("保持原始", "1080p", "720p", "480p"))
+        self.resolution_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.frame_rate_combo = QComboBox()
         self.frame_rate_combo.addItems(("保持原始", "30 FPS", "24 FPS", "60 FPS"))
+        self.frame_rate_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self._add_form_row(basic_form, 0, "画质", self.quality_combo)
         self._add_form_row(basic_form, 1, "分辨率", self.resolution_combo)
         self._add_form_row(basic_form, 2, "帧率", self.frame_rate_combo)
@@ -582,34 +601,54 @@ class MainWindow(QMainWindow):
         output_label.setObjectName("SectionLabel")
         output_row = QHBoxLayout()
         output_row.setSpacing(8)
-        self.output_path = QLineEdit("输出到源文件旁的 converted 目录")
+        self.output_path = QLineEdit("默认：源文件旁的 converted")
         self.output_path.setReadOnly(True)
         self.browse_button = QToolButton()
         self.browse_button.setObjectName("IconButton")
         self.browse_button.setToolTip("选择输出目录")
-        self.browse_button.clicked.connect(
-            lambda: self._show_footer_message("输出目录选择将在步骤 6 接入")
-        )
+        self.browse_button.clicked.connect(self._choose_output_directory)
+        self.reset_output_button = QToolButton()
+        self.reset_output_button.setObjectName("IconButton")
+        self.reset_output_button.setToolTip("恢复默认输出目录")
+        self.reset_output_button.clicked.connect(self._reset_output_directory)
         output_row.addWidget(self.output_path, 1)
         output_row.addWidget(self.browse_button)
+        output_row.addWidget(self.reset_output_button)
+
+        self.output_name_preview = QLabel("输出文件：--")
+        self.output_name_preview.setProperty("muted", True)
+        self.output_name_preview.setWordWrap(True)
 
         advanced = CollapsibleSection("高级设置")
+        self.advanced_section = advanced
         self.video_codec_combo = QComboBox()
-        self.video_codec_combo.addItems(("H.264", "H.265", "AV1", "VP9"))
+        self.video_codec_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.crf_spin = QSpinBox()
         self.crf_spin.setRange(0, 51)
         self.crf_spin.setValue(23)
+        self.crf_spin.valueChanged.connect(self._on_conversion_control_changed)
         self.audio_codec_combo = QComboBox()
-        self.audio_codec_combo.addItems(("AAC", "Opus", "MP3"))
+        self.audio_codec_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.audio_bitrate_combo = QComboBox()
         self.audio_bitrate_combo.addItems(("128 kbps", "192 kbps", "256 kbps", "320 kbps"))
-        keep_audio = QCheckBox("保留音频")
-        keep_audio.setChecked(True)
+        self.audio_bitrate_combo.currentTextChanged.connect(self._on_conversion_control_changed)
+        self.keep_audio_checkbox = QCheckBox("保留音频")
+        self.keep_audio_checkbox.setChecked(True)
+        self.keep_audio_checkbox.toggled.connect(self._on_conversion_control_changed)
         self._add_form_row(advanced.content_layout, 0, "视频编码", self.video_codec_combo)
         self._add_form_row(advanced.content_layout, 1, "CRF", self.crf_spin)
         self._add_form_row(advanced.content_layout, 2, "音频编码", self.audio_codec_combo)
         self._add_form_row(advanced.content_layout, 3, "音频码率", self.audio_bitrate_combo)
-        advanced.content_layout.addWidget(keep_audio, 4, 0, 1, 2)
+        advanced.content_layout.addWidget(self.keep_audio_checkbox, 4, 0, 1, 2)
+
+        command_section = CollapsibleSection("FFmpeg 命令预览")
+        self.command_section = command_section
+        self.command_preview = QPlainTextEdit()
+        self.command_preview.setObjectName("CommandPreview")
+        self.command_preview.setReadOnly(True)
+        self.command_preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.command_preview.setMaximumHeight(110)
+        command_section.content_layout.addWidget(self.command_preview, 0, 0, 1, 2)
 
         content_layout.addWidget(format_label)
         content_layout.addLayout(format_grid)
@@ -617,7 +656,9 @@ class MainWindow(QMainWindow):
         content_layout.addSpacing(2)
         content_layout.addWidget(output_label)
         content_layout.addLayout(output_row)
+        content_layout.addWidget(self.output_name_preview)
         content_layout.addWidget(advanced)
+        content_layout.addWidget(command_section)
         content_layout.addStretch(1)
         scroll.setWidget(content)
 
@@ -640,6 +681,237 @@ class MainWindow(QMainWindow):
         layout.addWidget(widget, row, 1)
         layout.setColumnStretch(1, 1)
 
+    def _on_format_changed(self, button: QToolButton, checked: bool) -> None:
+        if not checked or self._loading_conversion_settings:
+            return
+        self._apply_format_defaults(button.text())
+        self._on_conversion_control_changed()
+
+    def _on_quality_changed(self, quality: str) -> None:
+        if self._loading_conversion_settings:
+            return
+        self.crf_spin.setValue(QUALITY_DEFAULTS[quality][0])
+        self._on_conversion_control_changed()
+
+    def _on_conversion_control_changed(self, *args) -> None:
+        del args
+        if self._loading_conversion_settings:
+            return
+        self._set_conversion_controls_enabled(self._selected_output_format())
+        self._save_conversion_settings()
+        self._update_output_preview()
+
+    def _selected_output_format(self) -> str:
+        for name, button in self.format_buttons.items():
+            if button.isChecked():
+                return name
+        return "MP4"
+
+    def _configure_format_options(
+        self,
+        output_format: str,
+        video_codec: str | None = None,
+        audio_codec: str | None = None,
+    ) -> None:
+        video_options = VIDEO_CODEC_OPTIONS[output_format]
+        default_video, default_audio = FORMAT_DEFAULTS[output_format]
+
+        self.video_codec_combo.clear()
+        self.video_codec_combo.addItems(video_options)
+        chosen_video = video_codec if video_codec in video_options else default_video
+        if chosen_video:
+            self.video_codec_combo.setCurrentText(chosen_video)
+
+        audio_options = AUDIO_CODEC_OPTIONS[output_format]
+        self.audio_codec_combo.clear()
+        self.audio_codec_combo.addItems(audio_options)
+        chosen_audio = audio_codec if audio_codec in audio_options else default_audio
+        if chosen_audio:
+            self.audio_codec_combo.setCurrentText(chosen_audio)
+
+    def _apply_format_defaults(self, output_format: str) -> None:
+        previous_loading = self._loading_conversion_settings
+        self._loading_conversion_settings = True
+        try:
+            self._configure_format_options(output_format)
+            if output_format in {"MP4", "MKV", "WebM"}:
+                self.quality_combo.setCurrentText("平衡（推荐）")
+                self.crf_spin.setValue(23)
+            if output_format == "GIF":
+                self.keep_audio_checkbox.setChecked(False)
+            elif output_format in {"MP3", "WAV"}:
+                self.keep_audio_checkbox.setChecked(True)
+            self._set_conversion_controls_enabled(output_format)
+        finally:
+            self._loading_conversion_settings = previous_loading
+
+    def _set_conversion_controls_enabled(self, output_format: str) -> None:
+        video_capable = output_format in {"MP4", "MKV", "WebM"}
+        audio_capable = output_format not in {"GIF"}
+        basic_video = output_format in {"MP4", "MKV", "WebM"}
+
+        self.quality_combo.setEnabled(basic_video)
+        self.resolution_combo.setEnabled(video_capable and output_format != "GIF")
+        self.frame_rate_combo.setEnabled(video_capable and output_format != "GIF")
+        self.video_codec_combo.setEnabled(video_capable)
+        self.crf_spin.setEnabled(video_capable)
+
+        if output_format in {"MP3", "WAV"}:
+            self.keep_audio_checkbox.setChecked(True)
+            self.keep_audio_checkbox.setEnabled(False)
+        elif output_format == "GIF":
+            self.keep_audio_checkbox.setChecked(False)
+            self.keep_audio_checkbox.setEnabled(False)
+        else:
+            self.keep_audio_checkbox.setEnabled(True)
+
+        audio_enabled = audio_capable and self.keep_audio_checkbox.isChecked()
+        self.audio_codec_combo.setEnabled(audio_enabled)
+        self.audio_bitrate_combo.setEnabled(
+            audio_enabled
+            and output_format != "WAV"
+            and self.audio_codec_combo.currentText() != "PCM"
+        )
+
+    def _current_conversion_settings(self) -> ConversionSettings:
+        return ConversionSettings(
+            output_format=self._selected_output_format(),
+            quality=self.quality_combo.currentText(),
+            resolution=self.resolution_combo.currentText(),
+            frame_rate=self.frame_rate_combo.currentText(),
+            video_codec=self.video_codec_combo.currentText(),
+            audio_codec=self.audio_codec_combo.currentText(),
+            audio_bitrate=self.audio_bitrate_combo.currentText(),
+            crf=self.crf_spin.value(),
+            keep_audio=self.keep_audio_checkbox.isChecked(),
+        )
+
+    def _load_conversion_settings(self) -> None:
+        self._loading_conversion_settings = True
+        output_format = str(self.settings.value("conversion/format", "MP4"))
+        if output_format not in self.format_buttons:
+            output_format = "MP4"
+        self.format_buttons[output_format].setChecked(True)
+
+        saved_video = str(self.settings.value("conversion/video_codec", ""))
+        saved_audio = str(self.settings.value("conversion/audio_codec", ""))
+        self._configure_format_options(output_format, saved_video, saved_audio)
+
+        self._set_combo_value(
+            self.quality_combo,
+            str(self.settings.value("conversion/quality", "平衡（推荐）")),
+        )
+        self._set_combo_value(
+            self.resolution_combo,
+            str(self.settings.value("conversion/resolution", "保持原始")),
+        )
+        self._set_combo_value(
+            self.frame_rate_combo,
+            str(self.settings.value("conversion/frame_rate", "保持原始")),
+        )
+        self._set_combo_value(
+            self.audio_bitrate_combo,
+            str(self.settings.value("conversion/audio_bitrate", "192 kbps")),
+        )
+        self.crf_spin.setValue(self._settings_int("conversion/crf", 23))
+        self.keep_audio_checkbox.setChecked(self._settings_bool("conversion/keep_audio", True))
+
+        output_directory = str(self.settings.value("conversion/output_directory", ""))
+        if output_directory:
+            candidate = Path(output_directory)
+            if candidate.is_dir():
+                self.output_directory = candidate
+
+        self._loading_conversion_settings = False
+        self._set_conversion_controls_enabled(output_format)
+        self._update_output_preview()
+
+    def _save_conversion_settings(self) -> None:
+        settings = self._current_conversion_settings()
+        self.settings.setValue("conversion/format", settings.output_format)
+        self.settings.setValue("conversion/quality", settings.quality)
+        self.settings.setValue("conversion/resolution", settings.resolution)
+        self.settings.setValue("conversion/frame_rate", settings.frame_rate)
+        self.settings.setValue("conversion/video_codec", settings.video_codec)
+        self.settings.setValue("conversion/audio_codec", settings.audio_codec)
+        self.settings.setValue("conversion/audio_bitrate", settings.audio_bitrate)
+        self.settings.setValue("conversion/crf", settings.crf)
+        self.settings.setValue("conversion/keep_audio", settings.keep_audio)
+        self.settings.setValue(
+            "conversion/output_directory",
+            str(self.output_directory) if self.output_directory else "",
+        )
+
+    def _settings_bool(self, key: str, default: bool) -> bool:
+        value = self.settings.value(key, default)
+        if isinstance(value, bool):
+            return value
+        return str(value).lower() not in {"0", "false", "no", ""}
+
+    def _settings_int(self, key: str, default: int) -> int:
+        try:
+            return int(self.settings.value(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _set_combo_value(combo: QComboBox, value: str) -> None:
+        index = combo.findText(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _choose_output_directory(self) -> None:
+        initial = self.output_directory or Path(
+            str(self.settings.value("files/last_import_directory", "")) or Path.home()
+        )
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "选择输出目录",
+            str(initial),
+        )
+        if not selected:
+            return
+        self.output_directory = Path(selected)
+        self._save_conversion_settings()
+        self._update_output_preview()
+
+    def _reset_output_directory(self) -> None:
+        self.output_directory = None
+        self._save_conversion_settings()
+        self._update_output_preview()
+
+    def _update_output_preview(self) -> None:
+        settings = self._current_conversion_settings()
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+
+        if task is not None:
+            output_path = unique_output_path(
+                task.path,
+                settings,
+                self.output_directory,
+            )
+        else:
+            output_directory = self.output_directory or Path("converted")
+            output_path = output_directory / f"输入文件_converted{settings.output_extension}"
+
+        if self.output_directory is None:
+            self.output_path.setText("默认：源文件旁的 converted")
+            self.output_path.setToolTip("")
+        else:
+            self.output_path.setText(str(self.output_directory))
+            self.output_path.setToolTip(str(self.output_directory))
+        self.output_path.setCursorPosition(0)
+
+        self.output_name_preview.setText(f"输出：{output_path.name}")
+        command = build_command_preview(
+            settings,
+            task.path if task else None,
+            output_path,
+            self._available_ffmpeg_path(),
+        )
+        self.command_preview.setPlainText(command)
+
     def _build_footer(self) -> QFrame:
         footer = QFrame()
         footer.setObjectName("Footer")
@@ -656,7 +928,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 5")
+        stage_label = QLabel("开发阶段 · 步骤 6")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -1032,6 +1304,7 @@ class MainWindow(QMainWindow):
         self.clear_button.setEnabled(has_tasks)
         self.remove_button.setEnabled(has_selection)
         self.clear_queue_button.setEnabled(has_tasks)
+        self._update_output_preview()
 
     def _show_footer_message(
         self,
@@ -1192,6 +1465,13 @@ class MainWindow(QMainWindow):
         )
         self.browse_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_DirOpenIcon, palette.text)
+        )
+        self.reset_output_button.setIcon(
+            _colored_icon(
+                self,
+                QStyle.StandardPixmap.SP_BrowserReload,
+                palette.text,
+            )
         )
         self.start_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_MediaPlay, palette.text)

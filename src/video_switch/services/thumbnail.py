@@ -82,6 +82,12 @@ class ThumbnailService(QObject):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._on_timeout)
+        self._next_timer = QTimer(self)
+        self._next_timer.setSingleShot(True)
+        self._next_timer.timeout.connect(self._start_next)
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._start_attempt)
 
     def enqueue(self, task: MediaTask, ffmpeg_path: Path) -> bool:
         """Queue thumbnail generation unless it is cached or already pending."""
@@ -90,12 +96,7 @@ class ThumbnailService(QObject):
             task.content_signature,
         )
         if output_path.is_file() and output_path.stat().st_size > 0:
-            QTimer.singleShot(
-                0,
-                lambda: self.task_finished.emit(
-                    ThumbnailResult(task_key=task.key, thumbnail_path=output_path)
-                ),
-            )
+            self.task_finished.emit(ThumbnailResult(task_key=task.key, thumbnail_path=output_path))
             return True
 
         if task.key in self._queued_keys:
@@ -127,6 +128,8 @@ class ThumbnailService(QObject):
 
     def cancel_all(self) -> None:
         """Cancel all pending and active thumbnail jobs."""
+        self._next_timer.stop()
+        self._retry_timer.stop()
         self._queue.clear()
         self._queued_keys.clear()
         self._cancel_current()
@@ -234,7 +237,7 @@ class ThumbnailService(QObject):
         process = self._detach_process()
         if process is not None and process.state() != QProcess.ProcessState.NotRunning:
             process.kill()
-        QTimer.singleShot(0, self._start_attempt)
+        self._retry_timer.start(0)
 
     def _finish(self, result: ThumbnailResult) -> None:
         self._timer.stop()
@@ -242,10 +245,11 @@ class ThumbnailService(QObject):
         self._queued_keys.discard(result.task_key)
         self._current = None
         self.task_finished.emit(result)
-        QTimer.singleShot(0, self._start_next)
+        self._next_timer.start(0)
 
     def _cancel_current(self) -> None:
         self._timer.stop()
+        self._retry_timer.stop()
         process = self._detach_process()
         self._current = None
         if process is not None and process.state() != QProcess.ProcessState.NotRunning:

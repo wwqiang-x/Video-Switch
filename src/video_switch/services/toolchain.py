@@ -119,8 +119,14 @@ class _ToolProbe(QObject):
 
     completed = Signal(object)
 
-    def __init__(self, name: str, executable: Path, source: str) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        name: str,
+        executable: Path,
+        source: str,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
         self.name = name
         self.executable = executable
         self.source = source
@@ -217,6 +223,10 @@ class ToolchainDetector(QObject):
         self._queue: deque[tuple[str, Path, str]] = deque()
         self._results: dict[str, ToolInfo] = {}
         self._probe: _ToolProbe | None = None
+        self._next_timer = QTimer(self)
+        self._next_timer.setSingleShot(True)
+        self._next_timer.timeout.connect(self._start_queued_probe)
+        self._queued_generation = 0
 
     def detect(
         self,
@@ -250,6 +260,7 @@ class ToolchainDetector(QObject):
     def cancel(self) -> None:
         """Cancel the active probe and invalidate pending results."""
         self._generation += 1
+        self._next_timer.stop()
         if self._probe is not None:
             self._probe.cancel()
             self._probe = None
@@ -268,7 +279,7 @@ class ToolchainDetector(QObject):
             return
 
         name, executable, source = self._queue.popleft()
-        self._probe = _ToolProbe(name, executable, source)
+        self._probe = _ToolProbe(name, executable, source, self)
         self._probe.completed.connect(
             lambda result, run=generation: self._on_probe_complete(result, run)
         )
@@ -279,4 +290,8 @@ class ToolchainDetector(QObject):
             return
         self._results[result.name] = result
         self._probe = None
-        QTimer.singleShot(0, lambda: self._start_next(generation))
+        self._queued_generation = generation
+        self._next_timer.start(0)
+
+    def _start_queued_probe(self) -> None:
+        self._start_next(self._queued_generation)

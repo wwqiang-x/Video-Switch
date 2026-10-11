@@ -348,7 +348,8 @@ QToolButton[formatPreset="true"]:checked {{
 
 QLineEdit,
 QComboBox,
-QSpinBox {{
+QSpinBox,
+QPlainTextEdit {{
     background: {palette.surface_alt};
     border: 1px solid {palette.border_strong};
     border-radius: 6px;
@@ -359,8 +360,15 @@ QSpinBox {{
 
 QLineEdit:focus,
 QComboBox:focus,
-QSpinBox:focus {{
+QSpinBox:focus,
+QPlainTextEdit:focus {{
     border-color: {palette.primary};
+}}
+
+QPlainTextEdit#CommandPreview {{
+    font-family: "Cascadia Mono", "Consolas";
+    font-size: 11px;
+    padding: 8px;
 }}
 
 QLineEdit:read-only {{
