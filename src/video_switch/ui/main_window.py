@@ -73,6 +73,11 @@ VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
 )
+QUALITY_OPTIONS = ("平衡（推荐）", "高质量", "小体积")
+RESOLUTION_OPTIONS = ("保持原始", "1080p", "720p", "480p")
+FRAME_RATE_OPTIONS = ("保持原始", "30 FPS", "24 FPS", "60 FPS")
+AUDIO_BITRATE_OPTIONS = ("128 kbps", "192 kbps", "256 kbps", "320 kbps")
+NOT_APPLICABLE = "不适用"
 
 
 def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap) -> QIcon:
@@ -261,6 +266,7 @@ class MainWindow(QMainWindow):
         self._build_interface()
         self._load_conversion_settings()
         self._apply_theme()
+        QTimer.singleShot(0, self._restore_saved_tasks)
         QTimer.singleShot(0, self._detect_toolchain)
 
     def _build_interface(self) -> None:
@@ -585,13 +591,13 @@ class MainWindow(QMainWindow):
         basic_form.setHorizontalSpacing(10)
         basic_form.setVerticalSpacing(10)
         self.quality_combo = QComboBox()
-        self.quality_combo.addItems(("平衡（推荐）", "高质量", "小体积"))
+        self.quality_combo.addItems(QUALITY_OPTIONS)
         self.quality_combo.currentTextChanged.connect(self._on_quality_changed)
         self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(("保持原始", "1080p", "720p", "480p"))
+        self.resolution_combo.addItems(RESOLUTION_OPTIONS)
         self.resolution_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.frame_rate_combo = QComboBox()
-        self.frame_rate_combo.addItems(("保持原始", "30 FPS", "24 FPS", "60 FPS"))
+        self.frame_rate_combo.addItems(FRAME_RATE_OPTIONS)
         self.frame_rate_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self._add_form_row(basic_form, 0, "画质", self.quality_combo)
         self._add_form_row(basic_form, 1, "分辨率", self.resolution_combo)
@@ -625,12 +631,13 @@ class MainWindow(QMainWindow):
         self.video_codec_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.crf_spin = QSpinBox()
         self.crf_spin.setRange(0, 51)
+        self.crf_spin.setSpecialValueText(NOT_APPLICABLE)
         self.crf_spin.setValue(23)
         self.crf_spin.valueChanged.connect(self._on_conversion_control_changed)
         self.audio_codec_combo = QComboBox()
         self.audio_codec_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.audio_bitrate_combo = QComboBox()
-        self.audio_bitrate_combo.addItems(("128 kbps", "192 kbps", "256 kbps", "320 kbps"))
+        self.audio_bitrate_combo.addItems(AUDIO_BITRATE_OPTIONS)
         self.audio_bitrate_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.keep_audio_checkbox = QCheckBox("保留音频")
         self.keep_audio_checkbox.setChecked(True)
@@ -707,6 +714,84 @@ class MainWindow(QMainWindow):
                 return name
         return "MP4"
 
+    @staticmethod
+    def _configure_combo(
+        combo: QComboBox,
+        options: tuple[str, ...],
+        preferred: str | None = None,
+        fallback: str | None = None,
+    ) -> None:
+        combo.clear()
+        combo.addItems(options)
+        if preferred in options:
+            chosen = preferred
+        elif fallback in options:
+            chosen = fallback
+        else:
+            chosen = options[0]
+        combo.setCurrentText(chosen)
+
+    def _configure_quality_options(
+        self,
+        output_format: str,
+        preferred: str | None = None,
+    ) -> None:
+        options = QUALITY_OPTIONS if output_format in {"MP4", "MKV", "WebM"} else (NOT_APPLICABLE,)
+        self._configure_combo(
+            self.quality_combo,
+            options,
+            preferred,
+            "平衡（推荐）",
+        )
+
+    def _configure_resolution_options(
+        self,
+        output_format: str,
+        preferred: str | None = None,
+    ) -> None:
+        options = (
+            RESOLUTION_OPTIONS if output_format in {"MP4", "MKV", "WebM"} else (NOT_APPLICABLE,)
+        )
+        self._configure_combo(
+            self.resolution_combo,
+            options,
+            preferred,
+            "保持原始",
+        )
+
+    def _configure_frame_rate_options(
+        self,
+        output_format: str,
+        preferred: str | None = None,
+    ) -> None:
+        options = (
+            FRAME_RATE_OPTIONS if output_format in {"MP4", "MKV", "WebM"} else (NOT_APPLICABLE,)
+        )
+        self._configure_combo(
+            self.frame_rate_combo,
+            options,
+            preferred,
+            "保持原始",
+        )
+
+    def _configure_audio_bitrate_options(
+        self,
+        output_format: str,
+        audio_codec: str,
+        preferred: str | None = None,
+    ) -> None:
+        options = (
+            (NOT_APPLICABLE,)
+            if output_format in {"WAV", "GIF"} or audio_codec == "PCM"
+            else AUDIO_BITRATE_OPTIONS
+        )
+        self._configure_combo(
+            self.audio_bitrate_combo,
+            options,
+            preferred,
+            "192 kbps",
+        )
+
     def _configure_format_options(
         self,
         output_format: str,
@@ -734,9 +819,17 @@ class MainWindow(QMainWindow):
         self._loading_conversion_settings = True
         try:
             self._configure_format_options(output_format)
+            self._configure_quality_options(output_format)
+            self._configure_resolution_options(output_format)
+            self._configure_frame_rate_options(output_format)
+            self._configure_audio_bitrate_options(
+                output_format,
+                self.audio_codec_combo.currentText(),
+            )
             if output_format in {"MP4", "MKV", "WebM"}:
-                self.quality_combo.setCurrentText("平衡（推荐）")
                 self.crf_spin.setValue(23)
+            else:
+                self.crf_spin.setValue(0)
             if output_format == "GIF":
                 self.keep_audio_checkbox.setChecked(False)
             elif output_format in {"MP3", "WAV"}:
@@ -796,24 +889,25 @@ class MainWindow(QMainWindow):
         saved_video = str(self.settings.value("conversion/video_codec", ""))
         saved_audio = str(self.settings.value("conversion/audio_codec", ""))
         self._configure_format_options(output_format, saved_video, saved_audio)
-
-        self._set_combo_value(
-            self.quality_combo,
+        self._configure_quality_options(
+            output_format,
             str(self.settings.value("conversion/quality", "平衡（推荐）")),
         )
-        self._set_combo_value(
-            self.resolution_combo,
+        self._configure_resolution_options(
+            output_format,
             str(self.settings.value("conversion/resolution", "保持原始")),
         )
-        self._set_combo_value(
-            self.frame_rate_combo,
+        self._configure_frame_rate_options(
+            output_format,
             str(self.settings.value("conversion/frame_rate", "保持原始")),
         )
-        self._set_combo_value(
-            self.audio_bitrate_combo,
+        self._configure_audio_bitrate_options(
+            output_format,
+            self.audio_codec_combo.currentText(),
             str(self.settings.value("conversion/audio_bitrate", "192 kbps")),
         )
-        self.crf_spin.setValue(self._settings_int("conversion/crf", 23))
+        default_crf = 23 if output_format in {"MP4", "MKV", "WebM"} else 0
+        self.crf_spin.setValue(self._settings_int("conversion/crf", default_crf))
         self.keep_audio_checkbox.setChecked(self._settings_bool("conversion/keep_audio", True))
 
         output_directory = str(self.settings.value("conversion/output_directory", ""))
@@ -853,12 +947,6 @@ class MainWindow(QMainWindow):
             return int(self.settings.value(key, default))
         except (TypeError, ValueError):
             return default
-
-    @staticmethod
-    def _set_combo_value(combo: QComboBox, value: str) -> None:
-        index = combo.findText(value)
-        if index >= 0:
-            combo.setCurrentIndex(index)
 
     def _choose_output_directory(self) -> None:
         initial = self.output_directory or Path(
@@ -950,7 +1038,12 @@ class MainWindow(QMainWindow):
         self.settings.setValue("files/last_import_directory", str(Path(paths[0]).parent))
         self._import_paths(paths)
 
-    def _import_paths(self, paths: list[str]) -> None:
+    def _import_paths(
+        self,
+        paths: list[str],
+        show_feedback: bool = True,
+        persist: bool = True,
+    ) -> None:
         result = self.importer.import_paths(
             paths,
             set(self.tasks),
@@ -967,13 +1060,35 @@ class MainWindow(QMainWindow):
         if first_item is not None:
             self.task_list.setCurrentItem(first_item)
         self._probe_pending_tasks()
+        if persist:
+            self._save_task_paths()
 
-        message, details, state = self._import_feedback(result)
-        self._show_footer_message(
-            message,
-            details=details,
-            state=state,
-            timeout=6000,
+        if show_feedback:
+            message, details, state = self._import_feedback(result)
+            self._show_footer_message(
+                message,
+                details=details,
+                state=state,
+                timeout=6000,
+            )
+
+    def _restore_saved_tasks(self) -> None:
+        saved_paths = self.settings.value("tasks/paths", [])
+        if isinstance(saved_paths, str):
+            paths = [saved_paths] if saved_paths else []
+        elif isinstance(saved_paths, (list, tuple)):
+            paths = [str(path) for path in saved_paths if path]
+        else:
+            paths = []
+        if not paths:
+            return
+        self._import_paths(paths, show_feedback=False, persist=False)
+        self._save_task_paths()
+
+    def _save_task_paths(self) -> None:
+        self.settings.setValue(
+            "tasks/paths",
+            [str(task.path) for task in self.tasks.values()],
         )
 
     def _create_task_item(self, task: MediaTask) -> QListWidgetItem:
@@ -1269,6 +1384,7 @@ class MainWindow(QMainWindow):
         if task is not None:
             self.thumbnail_service.delete_cached(task.content_signature)
         self.task_list.takeItem(self.task_list.row(item))
+        self._save_task_paths()
         self._update_task_actions()
         self._show_footer_message("已移除所选任务", timeout=4000)
 
@@ -1293,6 +1409,7 @@ class MainWindow(QMainWindow):
         self.tasks.clear()
         self.task_items.clear()
         self.task_list.clear()
+        self._save_task_paths()
         self._update_task_actions()
         self._show_footer_message("任务队列已清空", timeout=4000)
 
