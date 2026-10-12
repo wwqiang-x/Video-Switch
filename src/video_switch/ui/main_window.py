@@ -1401,11 +1401,13 @@ class MainWindow(QMainWindow):
 
     def _task_icon(self) -> QIcon:
         palette = get_palette(self.theme_name)
-        return _colored_icon(
-            self,
-            QStyle.StandardPixmap.SP_FileIcon,
-            palette.primary,
-            24,
+        return QIcon(
+            _tinted_svg_pixmap(
+                FILE_ICON_PATH,
+                palette.primary,
+                24,
+                widget=self,
+            )
         )
 
     def _import_feedback(self, result: ImportResult) -> tuple[str, str, str]:
