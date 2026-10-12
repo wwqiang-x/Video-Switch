@@ -75,6 +75,7 @@ APP_NAME = "Video Switch"
 QUESTION_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "question.svg"
 PLAY_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "play.svg"
 FILE_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "file.svg"
+VIDEO_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "video.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -414,7 +415,7 @@ class MainWindow(QMainWindow):
 
         self.add_video_button = QPushButton("添加视频")
         self.add_video_button.setObjectName("PrimaryAction")
-        self.add_video_button.setIcon(_icon(self, QStyle.StandardPixmap.SP_DialogOpenButton))
+        self.add_video_button.setIconSize(QSize(15, 15))
         self.add_video_button.clicked.connect(self._choose_videos)
 
         self.clear_button = QToolButton()
@@ -1662,13 +1663,7 @@ class MainWindow(QMainWindow):
         self.theme_button.setToolTip(f"切换为{target}主题")
 
     def _apply_icon_theme(self, palette: ThemePalette) -> None:
-        self.add_video_button.setIcon(
-            _colored_icon(
-                self,
-                QStyle.StandardPixmap.SP_DialogOpenButton,
-                "#ffffff",
-            )
-        )
+        self.add_video_button.setIcon(QIcon(_tinted_svg_pixmap(VIDEO_ICON_PATH, "#ffffff", 15)))
         self.clear_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_TrashIcon, palette.muted)
         )
