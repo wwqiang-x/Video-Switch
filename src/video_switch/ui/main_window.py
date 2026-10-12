@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QStyle,
+    QStyleOptionButton,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -239,6 +240,96 @@ class AssetIconButton(QToolButton):
             )
             painter.setOpacity(1.0 if self.isEnabled() else 0.45)
             icon.paint(painter, icon_rect)
+        painter.end()
+
+
+class AddVideoButton(QPushButton):
+    """Primary action button with precise SVG icon and text placement."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self._label = text
+        self._icon_pixmap = QPixmap()
+        self.setMinimumHeight(38)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setAccessibleName(text)
+
+    def text(self) -> str:
+        return self._label
+
+    def set_asset_icon(self, path: Path, color: str) -> None:
+        icon_size = self.fontMetrics().height()
+        self._icon_pixmap = _tinted_svg_pixmap(
+            path,
+            color,
+            icon_size,
+            widget=self,
+        )
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        metrics = self.fontMetrics()
+        width = metrics.horizontalAdvance(self._label) + metrics.height() + 62
+        return QSize(width, 38)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def paintEvent(self, event) -> None:
+        del event
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.style().drawControl(
+            QStyle.ControlElement.CE_PushButton,
+            option,
+            painter,
+            self,
+        )
+
+        metrics = self.fontMetrics()
+        text_width = metrics.horizontalAdvance(self._label)
+        first_character_width = metrics.horizontalAdvance(self._label[0])
+        icon_size = (
+            self._icon_pixmap.deviceIndependentSize().toSize()
+            if not self._icon_pixmap.isNull()
+            else QSize()
+        )
+        text_x = (self.width() - text_width) // 2
+        first_character_center = text_x + first_character_width / 2
+        icon_center = first_character_center / 2
+        icon_x = max(
+            4,
+            round(icon_center - icon_size.width() / 2),
+        )
+
+        icon_y = (self.height() - icon_size.height()) // 2
+        if not self._icon_pixmap.isNull():
+            painter.drawPixmap(
+                QRectF(
+                    icon_x,
+                    icon_y,
+                    icon_size.width(),
+                    icon_size.height(),
+                ),
+                self._icon_pixmap,
+                QRectF(
+                    0,
+                    0,
+                    self._icon_pixmap.width(),
+                    self._icon_pixmap.height(),
+                ),
+            )
+
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(
+            QRect(text_x, 0, text_width + 2, self.height()),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            self._label,
+        )
         painter.end()
 
 
@@ -494,9 +585,8 @@ class MainWindow(QMainWindow):
         local_chip = QLabel("本地处理 · 无需联网")
         local_chip.setObjectName("StatusChip")
 
-        self.add_video_button = QPushButton("添加视频")
+        self.add_video_button = AddVideoButton("添加视频")
         self.add_video_button.setObjectName("PrimaryAction")
-        self.add_video_button.setIconSize(QSize(15, 15))
         self.add_video_button.clicked.connect(self._choose_videos)
 
         self.clear_button = AssetIconButton(
@@ -1752,16 +1842,7 @@ class MainWindow(QMainWindow):
         self.theme_button.setToolTip(f"切换为{target}主题")
 
     def _apply_icon_theme(self, palette: ThemePalette) -> None:
-        self.add_video_button.setIcon(
-            QIcon(
-                _tinted_svg_pixmap(
-                    VIDEO_ICON_PATH,
-                    "#ffffff",
-                    15,
-                    widget=self,
-                )
-            )
-        )
+        self.add_video_button.set_asset_icon(VIDEO_ICON_PATH, "#ffffff")
         self.clear_button.set_asset_icon(TRASH_ICON_PATH, palette.text)
         self.theme_button.set_asset_icon(THEME_ICON_PATH, palette.text)
         self.settings_button.set_asset_icon(SETTINGS_ICON_PATH, palette.text)
