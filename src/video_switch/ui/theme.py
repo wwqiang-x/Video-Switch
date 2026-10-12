@@ -12,6 +12,7 @@ class ThemePalette:
     surface: str
     surface_alt: str
     surface_hover: str
+    help_hover: str
     border: str
     border_strong: str
     text: str
@@ -36,6 +37,7 @@ LIGHT_PALETTE = ThemePalette(
     surface="#ffffff",
     surface_alt="#f7f9fc",
     surface_hover="#eef3f9",
+    help_hover="#e2e8f0",
     border="#dce3eb",
     border_strong="#c7d2df",
     text="#172033",
@@ -60,6 +62,7 @@ DARK_PALETTE = ThemePalette(
     surface="#171d24",
     surface_alt="#1d252e",
     surface_hover="#252f3a",
+    help_hover="#394858",
     border="#2d3946",
     border_strong="#3b4a5b",
     text="#edf2f7",
@@ -237,15 +240,15 @@ QLabel#QueueCount {{
 QToolButton#HelpIconButton,
 QToolButton#InfoIconButton {{
     background: transparent;
-    border: 1px solid transparent;
-    border-radius: 9px;
+    border: none;
+    border-radius: 10px;
+    margin: 0;
     padding: 0;
 }}
 
 QToolButton#HelpIconButton:hover,
 QToolButton#InfoIconButton:hover {{
-    background: {palette.surface_hover};
-    border-color: transparent;
+    background: {palette.help_hover};
 }}
 
 QFrame#FormatCard {{
