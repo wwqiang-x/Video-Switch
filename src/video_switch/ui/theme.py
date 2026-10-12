@@ -238,7 +238,7 @@ QToolButton#HelpIconButton,
 QToolButton#InfoIconButton {{
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 10px;
+    border-radius: 9px;
     padding: 0;
 }}
 
@@ -374,10 +374,13 @@ QToolButton#IconButton:disabled {{
 QToolButton#SectionToggle {{
     background: transparent;
     border: none;
+    padding: 0;
+}}
+
+QLabel#SectionTitle {{
     color: {palette.text};
+    font-size: 13px;
     font-weight: 650;
-    padding: 5px 0;
-    text-align: left;
 }}
 
 QToolButton[formatPreset="true"] {{

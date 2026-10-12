@@ -24,7 +24,7 @@ def test_format_help_button_opens_dialog(qtbot, isolated_settings) -> None:
     qtbot.addWidget(window)
 
     assert window.format_help_button.text() == ""
-    assert window.format_help_button.width() == 24
+    assert window.format_help_button.width() == 18
     assert window.format_help_button.icon().isNull() is False
 
     window.format_help_button.click()

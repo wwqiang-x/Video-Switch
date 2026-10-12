@@ -28,7 +28,7 @@ def test_advanced_help_button_opens_dialog(qtbot, isolated_settings) -> None:
 
     assert help_button is not None
     assert help_button.text() == ""
-    assert help_button.width() == 22
+    assert help_button.width() == 18
     assert help_button.icon().isNull() is False
 
     help_button.click()
