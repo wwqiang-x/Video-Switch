@@ -79,6 +79,7 @@ from video_switch.services.conversion_runner import (
 from video_switch.services.ffmpeg_command import (
     QUALITY_DEFAULTS,
     build_command_preview,
+    estimate_conversion_seconds,
     unique_output_path,
 )
 from video_switch.services.history_store import (
@@ -1034,12 +1035,18 @@ class MainWindow(QMainWindow):
 
         result_actions = QHBoxLayout()
         result_actions.setSpacing(8)
+        self.resume_conversion_button = QPushButton("恢复转换")
+        self.resume_conversion_button.setObjectName("SecondaryAction")
+        self.resume_conversion_button.setToolTip("从开始重新执行转换")
+        self.resume_conversion_button.clicked.connect(self._resume_conversion)
+        self.resume_conversion_button.hide()
         self.open_file_button = QPushButton("打开文件")
         self.open_file_button.setObjectName("SecondaryAction")
         self.open_file_button.clicked.connect(self._open_output_file)
         self.open_folder_button = QPushButton("打开所在目录")
         self.open_folder_button.setObjectName("SecondaryAction")
         self.open_folder_button.clicked.connect(self._open_output_folder)
+        result_actions.addWidget(self.resume_conversion_button)
         result_actions.addWidget(self.open_file_button)
         result_actions.addWidget(self.open_folder_button)
         result_actions.addStretch(1)
@@ -1233,6 +1240,8 @@ class MainWindow(QMainWindow):
 
         self.output_name_preview = ElidedLabel("输出：--")
         self.output_name_preview.setProperty("muted", True)
+        self.duration_estimate_label = QLabel("预计转换时长：--")
+        self.duration_estimate_label.setProperty("muted", True)
 
         advanced = CollapsibleSection(
             "高级设置",
@@ -1291,6 +1300,7 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(output_label)
         content_layout.addLayout(output_row)
         content_layout.addWidget(self.output_name_preview)
+        content_layout.addWidget(self.duration_estimate_label)
         content_layout.addWidget(advanced)
         content_layout.addWidget(command_section)
         content_layout.addStretch(1)
@@ -1629,6 +1639,22 @@ class MainWindow(QMainWindow):
         self.output_path.setCursorPosition(0)
 
         self.output_name_preview.setText(f"输出：{output_path.name}")
+        if task is not None and task.media_info is not None:
+            estimated_seconds = estimate_conversion_seconds(
+                settings,
+                task.media_info.duration_seconds,
+                task.media_info.width,
+                task.media_info.height,
+                task.media_info.frame_rate,
+            )
+            estimate_text = (
+                f"约 {self._format_duration(estimated_seconds)}"
+                if estimated_seconds is not None
+                else "--"
+            )
+        else:
+            estimate_text = "--"
+        self.duration_estimate_label.setText(f"预计转换时长：{estimate_text}")
         command = build_command_preview(
             settings,
             task.path if task else None,
@@ -1869,6 +1895,7 @@ class MainWindow(QMainWindow):
         self.regenerate_thumbnail_button.setVisible(info is not None)
         self.regenerate_thumbnail_button.setEnabled(info is not None)
         self._apply_conversion_to_preview(task)
+        self._update_output_preview()
 
     def _apply_thumbnail_to_preview(self, task: MediaTask) -> None:
         thumbnail_path = task.thumbnail_path
@@ -1916,6 +1943,7 @@ class MainWindow(QMainWindow):
         self.conversion_log.clear()
         self.history_section.hide()
         self.history_list.clear()
+        self.resume_conversion_button.hide()
         self._update_conversion_controls()
 
     def _probe_pending_tasks(self) -> None:
@@ -2039,6 +2067,7 @@ class MainWindow(QMainWindow):
             and task.output_path is not None
             and task.output_path.is_file()
         )
+        self.resume_conversion_button.setVisible(task.status == TaskStatus.CANCELLED)
         self.open_file_button.setVisible(has_output)
         self.open_folder_button.setVisible(has_output)
 
@@ -2136,6 +2165,21 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.conversion_status_label.setText("正在取消")
         self.conversion_runner.cancel()
+
+    def _resume_conversion(self) -> None:
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        if task is None or task.status != TaskStatus.CANCELLED:
+            return
+        task.status = TaskStatus.METADATA_READY
+        task.conversion_progress = 0.0
+        task.conversion_error = None
+        task.conversion_speed = None
+        task.conversion_eta_seconds = None
+        task.output_path = None
+        self._update_task_item(task)
+        self._apply_task_to_preview(task)
+        self._start_conversion()
 
     def _on_conversion_started(self, task_key: str, output_path: object) -> None:
         task = self.tasks.get(task_key)

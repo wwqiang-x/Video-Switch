@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from video_switch import main
 from video_switch.models.media_info import MediaInfo
+from video_switch.models.media_task import TaskStatus
 from video_switch.services.conversion_runner import ConversionResult
 from video_switch.services.history_store import ConversionHistoryStore
 from video_switch.services.media_probe import ProbeResult
@@ -474,3 +475,48 @@ def test_history_list_only_shows_selected_source(
 
     assert window.history_list.count() == 1
     assert "WebM" in window.history_list.item(0).text()
+
+
+def test_cancelled_conversion_shows_resume_button(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "resume.mp4"
+    output = tmp_path / "resume_converted.mp4"
+    source.write_bytes(b"video")
+    window = MainWindow(settings=isolated_settings)
+    window.history_store = ConversionHistoryStore(tmp_path / "history.json")
+    window.history_records = []
+    qtbot.addWidget(window)
+    window._import_paths([str(source)])
+    task = next(iter(window.tasks.values()))
+    window._on_conversion_started(task.key, output)
+    window._on_conversion_finished(
+        ConversionResult(
+            task_key=task.key,
+            source_key=task.content_signature,
+            source_path=source,
+            output_format="MP4",
+            output_path=output,
+            success=False,
+            cancelled=True,
+            error="转换已取消",
+            log="",
+            elapsed_seconds=1.0,
+        )
+    )
+    resumed: list[bool] = []
+    monkeypatch.setattr(
+        window,
+        "_start_conversion",
+        lambda: resumed.append(True),
+    )
+
+    assert window.resume_conversion_button.isHidden() is False
+
+    window.resume_conversion_button.click()
+
+    assert resumed == [True]
+    assert task.status == TaskStatus.METADATA_READY

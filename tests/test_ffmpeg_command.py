@@ -3,7 +3,11 @@
 from pathlib import Path
 
 from video_switch.models.conversion_settings import ConversionSettings
-from video_switch.services.ffmpeg_command import build_ffmpeg_args, unique_output_path
+from video_switch.services.ffmpeg_command import (
+    build_ffmpeg_args,
+    estimate_conversion_seconds,
+    unique_output_path,
+)
 
 
 def test_default_mp4_command() -> None:
@@ -72,3 +76,33 @@ def test_unique_output_path_adds_index(tmp_path: Path) -> None:
     )
 
     assert result == output_directory / "source_converted_1.mp4"
+
+
+def test_estimate_conversion_seconds_uses_codec_and_workload() -> None:
+    h264 = estimate_conversion_seconds(
+        ConversionSettings(),
+        duration_seconds=60,
+        source_height=1080,
+        source_frame_rate=30,
+    )
+    vp9 = estimate_conversion_seconds(
+        ConversionSettings(
+            output_format="WebM",
+            video_codec="VP9",
+            audio_codec="Opus",
+        ),
+        duration_seconds=60,
+        source_height=1080,
+        source_frame_rate=30,
+    )
+    lower_resolution = estimate_conversion_seconds(
+        ConversionSettings(resolution="720p"),
+        duration_seconds=60,
+        source_height=1080,
+        source_frame_rate=30,
+    )
+
+    assert h264 == 10.0
+    assert vp9 == 75.0
+    assert lower_resolution is not None
+    assert lower_resolution < h264

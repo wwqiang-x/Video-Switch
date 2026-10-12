@@ -27,6 +27,14 @@ QUALITY_DEFAULTS = {
     "小体积": (28, "veryfast"),
 }
 
+ENCODING_SPEED_FACTORS = {
+    "H.264": 6.0,
+    "H.265": 2.5,
+    "AV1": 0.8,
+    "VP9": 0.8,
+    "GIF": 1.5,
+}
+
 
 def _ffmpeg_bitrate(value: str) -> str:
     """Convert a user-facing bitrate such as ``192 kbps`` to ``192k``."""
@@ -130,3 +138,36 @@ def build_command_preview(
     executable_name = str(executable) if executable is not None else "ffmpeg"
     args = build_ffmpeg_args(settings, input_path, output_path)
     return subprocess.list2cmdline([executable_name, *args])
+
+
+def estimate_conversion_seconds(
+    settings: ConversionSettings,
+    duration_seconds: float | None,
+    source_width: int | None = None,
+    source_height: int | None = None,
+    source_frame_rate: float | None = None,
+) -> float | None:
+    """Estimate conversion time using format and workload factors."""
+    if not duration_seconds or duration_seconds <= 0:
+        return None
+    del source_width
+
+    if settings.output_format in {"MP3", "WAV"}:
+        encoding_speed = 25.0
+    else:
+        encoding_speed = ENCODING_SPEED_FACTORS.get(
+            settings.video_codec,
+            3.0,
+        )
+
+    if settings.resolution != "保持原始" and source_height:
+        target_height = int(settings.resolution.removesuffix("p"))
+        scale_factor = max(0.1, target_height / source_height)
+        encoding_speed /= max(0.1, scale_factor * scale_factor)
+
+    if settings.frame_rate != "保持原始" and source_frame_rate:
+        target_frame_rate = float(settings.frame_rate.removesuffix(" FPS"))
+        frame_rate_factor = max(0.1, target_frame_rate / source_frame_rate)
+        encoding_speed /= frame_rate_factor
+
+    return max(1.0, duration_seconds / max(0.1, encoding_speed))
