@@ -244,8 +244,8 @@ QToolButton#InfoIconButton {{
 
 QToolButton#HelpIconButton:hover,
 QToolButton#InfoIconButton:hover {{
-    background: {palette.surface_hover};
-    border-color: {palette.border};
+    background: transparent;
+    border-color: transparent;
 }}
 
 QFrame#FormatCard {{
