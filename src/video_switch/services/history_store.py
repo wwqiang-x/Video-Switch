@@ -43,7 +43,8 @@ class ConversionHistoryStore:
                         record_id=str(item["record_id"]),
                         timestamp=str(item["timestamp"]),
                         source_key=str(
-                            item.get("source_key") or Path(item["source_path"]).resolve().casefold()
+                            item.get("source_key")
+                            or str(Path(item["source_path"]).resolve()).casefold()
                         ),
                         source_path=Path(item["source_path"]),
                         output_path=Path(item["output_path"]),
