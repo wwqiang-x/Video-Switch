@@ -163,6 +163,20 @@ def test_mouse_wheel_does_not_change_settings(
     assert window.quality_combo.currentIndex() == original_index
 
 
+def test_settings_panel_does_not_clip_horizontally(
+    qtbot,
+    isolated_settings,
+) -> None:
+    window = MainWindow(settings=isolated_settings)
+    window.resize(1080, 680)
+    window.show()
+    qtbot.addWidget(window)
+    qtbot.wait(20)
+
+    assert window.settings_scroll.horizontalScrollBar().maximum() == 0
+    assert all(button.width() > 0 for button in window.format_buttons.values())
+
+
 def test_unsupported_import_shows_warning_dialog(
     qtbot,
     tmp_path,

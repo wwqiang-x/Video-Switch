@@ -988,9 +988,12 @@ class MainWindow(QMainWindow):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.settings_scroll = scroll
 
         content = QWidget()
+        content.setMinimumWidth(0)
+        self.settings_content = content
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 4, 0)
         content_layout.setSpacing(14)
@@ -1021,12 +1024,18 @@ class MainWindow(QMainWindow):
             button.setText(name)
             button.setCheckable(True)
             button.setProperty("formatPreset", True)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setMinimumWidth(0)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Fixed,
+            )
             if name == "MP4":
                 button.setChecked(True)
             self.format_group.addButton(button)
             self.format_buttons[name] = button
             format_grid.addWidget(button, index // 3, index % 3)
+        for column in range(3):
+            format_grid.setColumnStretch(column, 1)
         self.format_group.buttonToggled.connect(self._on_format_changed)
 
         basic_form = QGridLayout()
@@ -1091,6 +1100,20 @@ class MainWindow(QMainWindow):
         self.keep_audio_checkbox = QCheckBox("保留音频")
         self.keep_audio_checkbox.setChecked(True)
         self.keep_audio_checkbox.toggled.connect(self._on_conversion_control_changed)
+        for combo in (
+            self.quality_combo,
+            self.resolution_combo,
+            self.frame_rate_combo,
+            self.video_codec_combo,
+            self.audio_codec_combo,
+            self.audio_bitrate_combo,
+        ):
+            combo.setMinimumWidth(0)
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(5)
+        self.crf_spin.setMinimumWidth(0)
         self._add_form_row(advanced.content_layout, 0, "视频编码", self.video_codec_combo)
         self._add_form_row(advanced.content_layout, 1, "CRF", self.crf_spin)
         self._add_form_row(advanced.content_layout, 2, "音频编码", self.audio_codec_combo)
