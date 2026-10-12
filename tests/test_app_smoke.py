@@ -169,6 +169,8 @@ def test_settings_panel_does_not_clip_horizontally(
 ) -> None:
     window = MainWindow(settings=isolated_settings)
     window.resize(1080, 680)
+    window.output_name_preview.setText("输出：8ccf8ecc40068d1c758c624387187ba4_converted.mp4")
+    window.output_path.setText("D:/very/long/output/directory/8ccf8ecc40068d1c758c624387187ba4")
     window.show()
     qtbot.addWidget(window)
     qtbot.wait(20)

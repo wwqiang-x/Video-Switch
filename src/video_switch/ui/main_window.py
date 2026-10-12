@@ -921,7 +921,7 @@ class MainWindow(QMainWindow):
         progress_heading = QHBoxLayout()
         self.conversion_status_label = QLabel("转换进度")
         self.conversion_status_label.setObjectName("SectionLabel")
-        self.conversion_detail_label = QLabel("--")
+        self.conversion_detail_label = ElidedLabel("--")
         self.conversion_detail_label.setProperty("muted", True)
         progress_heading.addWidget(self.conversion_status_label)
         progress_heading.addStretch(1)
@@ -1075,9 +1075,8 @@ class MainWindow(QMainWindow):
         output_row.addWidget(self.browse_button)
         output_row.addWidget(self.reset_output_button)
 
-        self.output_name_preview = QLabel("输出文件：--")
+        self.output_name_preview = ElidedLabel("输出：--")
         self.output_name_preview.setProperty("muted", True)
-        self.output_name_preview.setWordWrap(True)
 
         advanced = CollapsibleSection(
             "高级设置",
