@@ -166,12 +166,15 @@ def _question_icon() -> QIcon:
 
 def _tinted_svg_pixmap(
     path: Path,
-    color: str,
+    color: str | None,
     size: int,
     widget: QWidget | None = None,
     device_pixel_ratio: float | None = None,
 ) -> QPixmap:
-    """Render a DPR-aware SVG at a logical square size and tint it."""
+    """Render a DPR-aware SVG at a logical square size, tinting it when asked.
+
+    Passing ``None`` keeps the colours authored in the SVG file.
+    """
     if device_pixel_ratio is None:
         screen = widget.screen() if widget is not None else None
         if screen is None:
@@ -187,8 +190,9 @@ def _tinted_svg_pixmap(
 
     painter = QPainter(pixmap)
     renderer.render(painter, QRectF(0, 0, size, size))
-    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-    painter.fillRect(QRectF(0, 0, size, size), QColor(color))
+    if color is not None:
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(QRectF(0, 0, size, size), QColor(color))
     painter.end()
     return pixmap
 
@@ -1824,12 +1828,15 @@ class MainWindow(QMainWindow):
 
     def _warning_dialog(self, title: str, text: str) -> QMessageBox:
         """Build a themed warning dialog with the bundled warning icon."""
+        palette = get_palette(self.theme_name)
         dialog = QMessageBox(self)
         dialog.setWindowTitle(title)
         dialog.setIconPixmap(
             _tinted_svg_pixmap(
                 WARNING_ICON_PATH,
-                get_palette(self.theme_name).warning,
+                # Light theme keeps the black icon from the SVG file;
+                # a dark background needs a light tint to stay readable.
+                None if palette.name == "light" else palette.text,
                 MESSAGE_ICON_SIZE,
                 widget=self,
             )
