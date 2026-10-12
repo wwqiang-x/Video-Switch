@@ -204,7 +204,7 @@ def test_resume_conversion_resets_progress_when_not_resumable(
     assert task.conversion_progress == 0.0
 
 
-def test_clear_cancelled_state_removes_parts_and_resets_task(
+def test_clear_conversion_state_removes_parts_and_resets_task(
     qtbot,
     tmp_path,
     isolated_settings,
@@ -222,7 +222,7 @@ def test_clear_cancelled_state_removes_parts_and_resets_task(
     window._apply_task_to_preview(task)
     window._confirm_discard_progress = lambda _task: True
 
-    window._clear_cancelled_state()
+    window._clear_conversion_state()
 
     assert task.status == TaskStatus.METADATA_READY
     assert task.conversion_part_dir is None
@@ -235,7 +235,7 @@ def test_clear_cancelled_state_removes_parts_and_resets_task(
     assert window.clear_state_button.isVisibleTo(window) is False
 
 
-def test_clear_cancelled_state_keeps_parts_when_user_declines(
+def test_clear_conversion_state_keeps_parts_when_user_declines(
     qtbot,
     tmp_path,
     isolated_settings,
@@ -252,7 +252,7 @@ def test_clear_cancelled_state_keeps_parts_when_user_declines(
     window._apply_task_to_preview(task)
     window._confirm_discard_progress = lambda _task: False
 
-    window._clear_cancelled_state()
+    window._clear_conversion_state()
 
     assert task.status == TaskStatus.CANCELLED
     assert task.conversion_resumable is True
@@ -261,7 +261,7 @@ def test_clear_cancelled_state_keeps_parts_when_user_declines(
     assert window.clear_state_button.isVisibleTo(window)
 
 
-def test_clear_cancelled_state_skips_confirmation_without_segments(
+def test_clear_conversion_state_skips_confirmation_without_segments(
     qtbot,
     tmp_path,
     isolated_settings,
@@ -277,7 +277,7 @@ def test_clear_cancelled_state_skips_confirmation_without_segments(
 
     window._confirm_discard_progress = fail
 
-    window._clear_cancelled_state()
+    window._clear_conversion_state()
 
     assert task.status == TaskStatus.METADATA_READY
     assert task.conversion_resumable is False
@@ -376,6 +376,73 @@ def test_cancelled_conversion_result_keeps_progress(
     assert task.status == TaskStatus.CANCELLED
     assert task.conversion_progress == 58.0
     assert task.conversion_resumable is True
+
+
+def _completed_task_window(qtbot, tmp_path, isolated_settings):
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    output = tmp_path / "converted" / "clip_converted.mkv"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"converted output")
+    task.status = TaskStatus.COMPLETED
+    task.output_path = output
+    task.conversion_format = "MKV"
+    task.conversion_summary = "MKV · H.264"
+    task.conversion_progress = 100.0
+    window._apply_task_to_preview(task)
+    return window, task, output
+
+
+def test_completed_task_shows_clear_state_button_at_row_end(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task, _output = _completed_task_window(qtbot, tmp_path, isolated_settings)
+    window.show()
+    qtbot.waitExposed(window)
+
+    button = window.clear_state_button
+    frame = window.conversion_progress_frame
+
+    assert button.isVisibleTo(window)
+    assert "清除完成状态" in button.toolTip()
+    assert button.geometry().right() >= frame.width() - 20
+    assert button.geometry().left() > window.open_folder_button.geometry().right()
+    assert window.resume_conversion_button.isVisibleTo(window) is False
+
+
+def test_clear_conversion_state_keeps_the_output_file(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task, output = _completed_task_window(qtbot, tmp_path, isolated_settings)
+
+    window._clear_conversion_state()
+
+    assert task.status == TaskStatus.METADATA_READY
+    assert task.output_path is None
+    assert task.conversion_progress == 0.0
+    assert task.conversion_summary is None
+    assert task.conversion_format is None
+    assert output.is_file()
+    assert window.clear_state_button.isVisibleTo(window) is False
+    assert window.open_file_button.isVisibleTo(window) is False
+
+
+def test_completed_task_clear_skips_confirmation(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, _task, _output = _completed_task_window(qtbot, tmp_path, isolated_settings)
+
+    def fail(_task) -> bool:
+        raise AssertionError("confirmation should not be asked")
+
+    window._confirm_discard_progress = fail
+
+    window._clear_conversion_state()
 
 
 def test_cancel_updates_the_row_immediately(

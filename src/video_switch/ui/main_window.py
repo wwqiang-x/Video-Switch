@@ -1048,7 +1048,7 @@ class MainWindow(QMainWindow):
             "AssetIconButton",
             "删除当前取消状态",
         )
-        self.clear_state_button.clicked.connect(self._clear_cancelled_state)
+        self.clear_state_button.clicked.connect(self._clear_conversion_state)
         self.clear_state_button.hide()
         self.open_file_button = QPushButton("打开文件")
         self.open_file_button.setObjectName("SecondaryAction")
@@ -2098,7 +2098,13 @@ class MainWindow(QMainWindow):
         else:
             self.resume_conversion_button.setText("重新转换")
             self.resume_conversion_button.setToolTip("从开始重新执行转换")
-        self.clear_state_button.setVisible(cancelled)
+        clearable = task.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}
+        self.clear_state_button.setVisible(clearable)
+        self.clear_state_button.setToolTip(
+            "清除完成状态，输出文件会保留"
+            if task.status == TaskStatus.COMPLETED
+            else "删除当前取消状态"
+        )
         self.open_file_button.setVisible(has_output)
         self.open_folder_button.setVisible(has_output)
 
@@ -2214,13 +2220,17 @@ class MainWindow(QMainWindow):
         self._apply_task_to_preview(task)
         self._start_conversion()
 
-    def _clear_cancelled_state(self) -> None:
-        """Drop a cancelled conversion so the task looks freshly imported."""
+    def _clear_conversion_state(self) -> None:
+        """Drop a finished conversion so the task looks freshly imported."""
         task_key = self._current_task_key()
         task = self.tasks.get(task_key) if task_key else None
-        if task is None or task.status != TaskStatus.CANCELLED:
+        if task is None or task.status not in {
+            TaskStatus.COMPLETED,
+            TaskStatus.CANCELLED,
+        }:
             return
-        had_parts = self._has_kept_progress(task)
+        was_completed = task.status == TaskStatus.COMPLETED
+        had_parts = not was_completed and self._has_kept_progress(task)
         if had_parts and not self._confirm_discard_progress(task):
             return
         self._discard_conversion_parts(task)
@@ -2235,10 +2245,13 @@ class MainWindow(QMainWindow):
         task.status = TaskStatus.METADATA_READY
         self._update_task_item(task)
         self._apply_task_to_preview(task)
-        self._show_footer_message(
-            "已清除取消状态和保留进度" if had_parts else "已清除取消状态",
-            timeout=4000,
-        )
+        if was_completed:
+            message = "已清除完成状态，输出文件仍然保留"
+        elif had_parts:
+            message = "已清除取消状态和保留进度"
+        else:
+            message = "已清除取消状态"
+        self._show_footer_message(message, timeout=4000)
 
     def _confirm_discard_progress(self, task: MediaTask) -> bool:
         """Warn before dropping the segments kept by a cancelled conversion."""
