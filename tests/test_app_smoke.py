@@ -15,6 +15,7 @@ from video_switch.ui.main_window import (
     TRASH_ICON_PATH,
     VIDEO_ICON_PATH,
     MainWindow,
+    _tinted_svg_pixmap,
 )
 
 
@@ -55,9 +56,11 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.start_button.isEnabled() is False
     assert window.regenerate_thumbnail_button.isHidden() is True
     assert window.preview_icon.pixmap().isNull() is False
-    assert window.preview_icon.pixmap().width() == 64
+    preview_size = window.preview_icon.pixmap().deviceIndependentSize()
+    assert round(preview_size.width()) == 64
     assert window.empty_queue_icon.pixmap().isNull() is False
-    assert window.empty_queue_icon.pixmap().width() == 48
+    queue_size = window.empty_queue_icon.pixmap().deviceIndependentSize()
+    assert round(queue_size.width()) == 48
     preview_layout = window.preview_icon.parentWidget().layout()
     icon_item = preview_layout.itemAt(preview_layout.indexOf(window.preview_icon))
     assert icon_item.alignment() & Qt.AlignmentFlag.AlignHCenter
@@ -65,6 +68,19 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     queue_icon_item = queue_layout.itemAt(queue_layout.indexOf(window.empty_queue_icon))
     assert queue_icon_item.alignment() & Qt.AlignmentFlag.AlignHCenter
     assert window.media_status.text() == "未选择"
+
+
+def test_svg_rendering_uses_device_pixel_ratio() -> None:
+    pixmap = _tinted_svg_pixmap(
+        FILE_ICON_PATH,
+        "#000000",
+        24,
+        device_pixel_ratio=2.0,
+    )
+
+    assert pixmap.width() == 48
+    assert pixmap.height() == 48
+    assert pixmap.devicePixelRatio() == 2.0
 
 
 def test_importing_video_updates_queue_and_preview(

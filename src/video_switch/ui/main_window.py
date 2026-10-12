@@ -1,13 +1,25 @@
 """Main desktop window and step-one interface shell."""
 
+from math import ceil
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QPointF,
+    QRect,
+    QRectF,
+    QSettings,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
     QFontMetrics,
+    QGuiApplication,
     QIcon,
     QPainter,
     QPixmap,
@@ -100,16 +112,31 @@ def _question_icon() -> QIcon:
     return QIcon(str(QUESTION_ICON_PATH))
 
 
-def _tinted_svg_pixmap(path: Path, color: str, size: int) -> QPixmap:
-    """Render an SVG at a fixed square size and tint it to a theme color."""
+def _tinted_svg_pixmap(
+    path: Path,
+    color: str,
+    size: int,
+    widget: QWidget | None = None,
+    device_pixel_ratio: float | None = None,
+) -> QPixmap:
+    """Render a DPR-aware SVG at a logical square size and tint it."""
+    if device_pixel_ratio is None:
+        screen = widget.screen() if widget is not None else None
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        device_pixel_ratio = screen.devicePixelRatio() if screen is not None else 1.0
+    device_pixel_ratio = max(1.0, device_pixel_ratio)
+    physical_size = max(1, ceil(size * device_pixel_ratio))
+
     renderer = QSvgRenderer(str(path))
-    pixmap = QPixmap(size, size)
+    pixmap = QPixmap(physical_size, physical_size)
+    pixmap.setDevicePixelRatio(device_pixel_ratio)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
     renderer.render(painter, QRectF(0, 0, size, size))
     painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-    painter.fillRect(pixmap.rect(), QColor(color))
+    painter.fillRect(QRectF(0, 0, size, size), QColor(color))
     painter.end()
     return pixmap
 
@@ -176,7 +203,7 @@ class AssetIconButton(QToolButton):
         self._hover_color = QColor("#e2e8f0")
 
     def set_asset_icon(self, path: Path, color: str) -> None:
-        self.setIcon(QIcon(_tinted_svg_pixmap(path, color, 18)))
+        self.setIcon(QIcon(_tinted_svg_pixmap(path, color, 18, widget=self)))
         self.update()
 
     def set_hover_color(self, color: str) -> None:
@@ -1711,6 +1738,11 @@ class MainWindow(QMainWindow):
         self.settings.setValue("ui/theme", self.theme_name)
         self._apply_theme()
 
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.DevicePixelRatioChange:
+            self._apply_icon_theme(get_palette(self.theme_name))
+
     def _apply_theme(self) -> None:
         palette = get_palette(self.theme_name)
         self.setStyleSheet(build_stylesheet(palette))
@@ -1720,7 +1752,16 @@ class MainWindow(QMainWindow):
         self.theme_button.setToolTip(f"切换为{target}主题")
 
     def _apply_icon_theme(self, palette: ThemePalette) -> None:
-        self.add_video_button.setIcon(QIcon(_tinted_svg_pixmap(VIDEO_ICON_PATH, "#ffffff", 15)))
+        self.add_video_button.setIcon(
+            QIcon(
+                _tinted_svg_pixmap(
+                    VIDEO_ICON_PATH,
+                    "#ffffff",
+                    15,
+                    widget=self,
+                )
+            )
+        )
         self.clear_button.set_asset_icon(TRASH_ICON_PATH, palette.text)
         self.theme_button.set_asset_icon(THEME_ICON_PATH, palette.text)
         self.settings_button.set_asset_icon(SETTINGS_ICON_PATH, palette.text)
@@ -1732,6 +1773,7 @@ class MainWindow(QMainWindow):
                 FILE_ICON_PATH,
                 palette.muted,
                 48,
+                widget=self,
             )
         )
         self.preview_icon.setPixmap(
@@ -1739,6 +1781,7 @@ class MainWindow(QMainWindow):
                 PLAY_ICON_PATH,
                 palette.preview_muted,
                 64,
+                widget=self,
             )
         )
         self.browse_button.setIcon(
