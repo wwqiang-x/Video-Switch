@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -64,6 +64,7 @@ from video_switch.services.video_importer import (
     VideoImporter,
     format_file_size,
 )
+from video_switch.ui.advanced_help_dialog import AdvancedHelpDialog
 from video_switch.ui.fonts import register_cjk_fonts
 from video_switch.ui.format_help_dialog import FormatHelpDialog
 from video_switch.ui.settings_dialog import SettingsDialog
@@ -199,7 +200,9 @@ class ThumbnailLabel(QLabel):
 class CollapsibleSection(QWidget):
     """A lightweight expandable settings section."""
 
-    def __init__(self, title: str) -> None:
+    help_requested = Signal()
+
+    def __init__(self, title: str, help_tooltip: str | None = None) -> None:
         super().__init__()
         self.toggle = QToolButton()
         self.toggle.setObjectName("SectionToggle")
@@ -207,6 +210,24 @@ class CollapsibleSection(QWidget):
         self.toggle.setCheckable(True)
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.toggle.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(5)
+        header_layout.addWidget(self.toggle)
+
+        self.help_button: QToolButton | None = None
+        if help_tooltip:
+            self.help_button = QToolButton()
+            self.help_button.setObjectName("InfoIconButton")
+            self.help_button.setText("i")
+            self.help_button.setToolTip(help_tooltip)
+            self.help_button.setFixedSize(20, 20)
+            self.help_button.clicked.connect(self.help_requested.emit)
+            header_layout.addWidget(self.help_button)
+        header_layout.addStretch(1)
 
         self.content = QWidget()
         self.content_layout = QGridLayout(self.content)
@@ -217,7 +238,7 @@ class CollapsibleSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.toggle)
+        layout.addWidget(header)
         layout.addWidget(self.content)
 
         self.toggle.toggled.connect(self._set_expanded)
@@ -243,6 +264,7 @@ class MainWindow(QMainWindow):
         self.output_directory: Path | None = None
         self._loading_conversion_settings = True
         self.format_help_dialog: FormatHelpDialog | None = None
+        self.advanced_help_dialog: AdvancedHelpDialog | None = None
         self._footer_reset_timer = QTimer(self)
         self._footer_reset_timer.setSingleShot(True)
         self._footer_reset_timer.timeout.connect(self._restore_toolchain_status)
@@ -639,8 +661,12 @@ class MainWindow(QMainWindow):
         self.output_name_preview.setProperty("muted", True)
         self.output_name_preview.setWordWrap(True)
 
-        advanced = CollapsibleSection("高级设置")
+        advanced = CollapsibleSection(
+            "高级设置",
+            help_tooltip="查看高级参数说明",
+        )
         self.advanced_section = advanced
+        advanced.help_requested.connect(self._show_advanced_help)
         self.video_codec_combo = QComboBox()
         self.video_codec_combo.currentTextChanged.connect(self._on_conversion_control_changed)
         self.crf_spin = QSpinBox()
@@ -1533,6 +1559,13 @@ class MainWindow(QMainWindow):
         self.format_help_dialog.show()
         self.format_help_dialog.raise_()
         self.format_help_dialog.activateWindow()
+
+    def _show_advanced_help(self) -> None:
+        if self.advanced_help_dialog is None:
+            self.advanced_help_dialog = AdvancedHelpDialog(self)
+        self.advanced_help_dialog.show()
+        self.advanced_help_dialog.raise_()
+        self.advanced_help_dialog.activateWindow()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(

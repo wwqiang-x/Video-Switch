@@ -99,7 +99,8 @@ QDialog {{
     background: {palette.app_bg};
 }}
 
-QDialog#FormatHelpDialog {{
+QDialog#FormatHelpDialog,
+QDialog#HelpCardDialog {{
     background: {palette.app_bg};
 }}
 
@@ -233,7 +234,8 @@ QLabel#QueueCount {{
     padding: 2px 8px;
 }}
 
-QToolButton#HelpIconButton {{
+QToolButton#HelpIconButton,
+QToolButton#InfoIconButton {{
     background: #111827;
     border: 1px solid {palette.border_strong};
     border-radius: 11px;
@@ -243,7 +245,8 @@ QToolButton#HelpIconButton {{
     padding: 0;
 }}
 
-QToolButton#HelpIconButton:hover {{
+QToolButton#HelpIconButton:hover,
+QToolButton#InfoIconButton:hover {{
     background: #374151;
 }}
 
