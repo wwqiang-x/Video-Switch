@@ -344,11 +344,13 @@ def test_conversion_history_record_is_added(
     window.history_store = ConversionHistoryStore(tmp_path / "history.json")
     window.history_records = []
     qtbot.addWidget(window)
+    window._import_paths([str(source)])
+    task = next(iter(window.tasks.values()))
 
     window._record_conversion_history(
         ConversionResult(
             task_key="task",
-            source_key="source-key",
+            source_key=task.content_signature,
             source_path=source,
             output_format="MKV",
             output_path=output,
@@ -361,12 +363,10 @@ def test_conversion_history_record_is_added(
     )
 
     assert len(window.history_records) == 1
-    assert window.history_tree.topLevelItemCount() == 1
-    group = window.history_tree.topLevelItem(0)
-    assert group.childCount() == 1
-    child = group.child(0)
-    assert child.text(0) == "MKV"
-    assert child.text(1) == str(output.parent)
+    assert window.history_list.count() == 1
+    item = window.history_list.item(0)
+    assert "MKV" in item.text()
+    assert str(output.parent) in item.text()
 
 
 def test_removing_task_can_delete_associated_history(
@@ -410,4 +410,62 @@ def test_removing_task_can_delete_associated_history(
 
     assert window.tasks == {}
     assert window.history_records == []
-    assert window.history_tree.topLevelItemCount() == 0
+    assert window.history_list.count() == 0
+
+
+def test_history_list_only_shows_selected_source(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    source_a = tmp_path / "source-a.mp4"
+    source_b = tmp_path / "source-b.mp4"
+    source_a.write_bytes(b"video-a")
+    source_b.write_bytes(b"video-b")
+    output_a = tmp_path / "source-a_converted.mp4"
+    output_b = tmp_path / "source-b_converted.mp4"
+    output_a.write_bytes(b"a")
+    output_b.write_bytes(b"b")
+    window = MainWindow(settings=isolated_settings)
+    window.history_store = ConversionHistoryStore(tmp_path / "history.json")
+    window.history_records = []
+    qtbot.addWidget(window)
+    window._import_paths([str(source_a), str(source_b)])
+    tasks = list(window.tasks.values())
+    window.task_list.setCurrentRow(0)
+    window._record_conversion_history(
+        ConversionResult(
+            task_key=tasks[0].key,
+            source_key=tasks[0].content_signature,
+            source_path=tasks[0].path,
+            output_format="MP4",
+            output_path=output_a,
+            success=True,
+            cancelled=False,
+            error=None,
+            log="",
+            elapsed_seconds=1.0,
+        )
+    )
+    window._record_conversion_history(
+        ConversionResult(
+            task_key=tasks[1].key,
+            source_key=tasks[1].content_signature,
+            source_path=tasks[1].path,
+            output_format="WebM",
+            output_path=output_b,
+            success=True,
+            cancelled=False,
+            error=None,
+            log="",
+            elapsed_seconds=1.0,
+        )
+    )
+
+    assert window.history_list.count() == 1
+    assert "MP4" in window.history_list.item(0).text()
+
+    window.task_list.setCurrentRow(1)
+
+    assert window.history_list.count() == 1
+    assert "WebM" in window.history_list.item(0).text()
