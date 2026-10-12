@@ -173,6 +173,9 @@ def test_settings_panel_does_not_clip_horizontally(
     qtbot.addWidget(window)
     qtbot.wait(20)
 
+    assert (
+        window.settings_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
     assert window.settings_scroll.horizontalScrollBar().maximum() == 0
     assert all(button.width() > 0 for button in window.format_buttons.values())
 
