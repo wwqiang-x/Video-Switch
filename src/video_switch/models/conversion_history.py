@@ -10,6 +10,7 @@ class ConversionHistoryRecord:
 
     record_id: str
     timestamp: str
+    source_key: str
     source_path: Path
     output_path: Path
     output_format: str

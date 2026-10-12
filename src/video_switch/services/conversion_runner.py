@@ -33,6 +33,7 @@ class ConversionResult:
     """Final result of one conversion run."""
 
     task_key: str
+    source_key: str
     source_path: Path
     output_format: str
     output_path: Path
@@ -118,6 +119,7 @@ class ConversionRunner(QObject):
         super().__init__(parent)
         self._process: QProcess | None = None
         self._task_key = ""
+        self._source_key = ""
         self._source_path = Path()
         self._output_format = ""
         self._output_path: Path | None = None
@@ -165,6 +167,7 @@ class ConversionRunner(QObject):
         )
 
         self._task_key = task.key
+        self._source_key = task.content_signature
         self._source_path = task.path
         self._output_format = settings.output_format
         self._output_path = output_path
@@ -273,6 +276,7 @@ class ConversionRunner(QObject):
             self._finish_result(
                 ConversionResult(
                     task_key=self._task_key,
+                    source_key=self._source_key,
                     source_path=self._source_path,
                     output_format=self._output_format,
                     output_path=self._output_path,
@@ -289,6 +293,7 @@ class ConversionRunner(QObject):
             self._finish_result(
                 ConversionResult(
                     task_key=self._task_key,
+                    source_key=self._source_key,
                     source_path=self._source_path,
                     output_format=self._output_format,
                     output_path=self._output_path,
@@ -306,6 +311,7 @@ class ConversionRunner(QObject):
         self._finish_result(
             ConversionResult(
                 task_key=self._task_key,
+                source_key=self._source_key,
                 source_path=self._source_path,
                 output_format=self._output_format,
                 output_path=self._output_path,
@@ -326,6 +332,7 @@ class ConversionRunner(QObject):
         self._finish_result(
             ConversionResult(
                 task_key=self._task_key,
+                source_key=self._source_key,
                 source_path=self._source_path,
                 output_format=self._output_format,
                 output_path=output_path,

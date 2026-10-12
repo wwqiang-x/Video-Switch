@@ -348,6 +348,7 @@ def test_conversion_history_record_is_added(
     window._record_conversion_history(
         ConversionResult(
             task_key="task",
+            source_key="source-key",
             source_path=source,
             output_format="MKV",
             output_path=output,
@@ -360,6 +361,53 @@ def test_conversion_history_record_is_added(
     )
 
     assert len(window.history_records) == 1
-    assert window.history_list.count() == 1
-    assert "MKV" in window.history_list.item(0).text()
-    assert str(output.parent) in window.history_list.item(0).text()
+    assert window.history_tree.topLevelItemCount() == 1
+    group = window.history_tree.topLevelItem(0)
+    assert group.childCount() == 1
+    child = group.child(0)
+    assert child.text(0) == "MKV"
+    assert child.text(1) == str(output.parent)
+
+
+def test_removing_task_can_delete_associated_history(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "remove-with-history.mp4"
+    output = tmp_path / "converted" / "remove-with-history.mp4"
+    output.parent.mkdir()
+    source.write_bytes(b"video")
+    output.write_bytes(b"converted")
+    window = MainWindow(settings=isolated_settings)
+    window.history_store = ConversionHistoryStore(tmp_path / "history.json")
+    window.history_records = []
+    qtbot.addWidget(window)
+    window._import_paths([str(source)])
+    task = next(iter(window.tasks.values()))
+    window._record_conversion_history(
+        ConversionResult(
+            task_key=task.key,
+            source_key=task.content_signature,
+            source_path=source,
+            output_format="MP4",
+            output_path=output,
+            success=True,
+            cancelled=False,
+            error=None,
+            log="",
+            elapsed_seconds=1.0,
+        )
+    )
+    monkeypatch.setattr(
+        window,
+        "_ask_history_delete",
+        lambda count, subject: "delete",
+    )
+
+    window._remove_selected_task()
+
+    assert window.tasks == {}
+    assert window.history_records == []
+    assert window.history_tree.topLevelItemCount() == 0

@@ -494,6 +494,18 @@ QListWidget#HistoryList::item {{
     padding: 7px 8px;
 }}
 
+QTreeWidget#HistoryTree {{
+    background: {palette.surface_alt};
+    border: 1px solid {palette.border};
+    border-radius: 7px;
+    outline: none;
+}}
+
+QTreeWidget#HistoryTree::item {{
+    min-height: 22px;
+    padding: 3px 4px;
+}}
+
 QScrollArea {{
     background: transparent;
     border: none;

@@ -42,6 +42,9 @@ class ConversionHistoryStore:
                     ConversionHistoryRecord(
                         record_id=str(item["record_id"]),
                         timestamp=str(item["timestamp"]),
+                        source_key=str(
+                            item.get("source_key") or Path(item["source_path"]).resolve().casefold()
+                        ),
                         source_path=Path(item["source_path"]),
                         output_path=Path(item["output_path"]),
                         output_format=str(item["output_format"]),
@@ -65,6 +68,19 @@ class ConversionHistoryStore:
 
     def clear(self) -> None:
         self._write([])
+
+    def delete_by_source_key(self, source_key: str) -> list[ConversionHistoryRecord]:
+        records = [record for record in self.load() if record.source_key != source_key]
+        self._write(records)
+        return records
+
+    def delete_by_source_keys(
+        self,
+        source_keys: set[str],
+    ) -> list[ConversionHistoryRecord]:
+        records = [record for record in self.load() if record.source_key not in source_keys]
+        self._write(records)
+        return records
 
     def _write(self, records: list[ConversionHistoryRecord]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

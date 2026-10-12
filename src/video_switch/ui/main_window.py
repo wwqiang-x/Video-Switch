@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -59,6 +60,8 @@ from PySide6.QtWidgets import (
     QStyle,
     QStyleOptionButton,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -979,12 +982,26 @@ class MainWindow(QMainWindow):
         self.conversion_log_section.hide()
 
         self.history_section = CollapsibleSection("转换历史")
-        self.history_list = QListWidget()
-        self.history_list.setObjectName("HistoryList")
-        self.history_list.setMaximumHeight(190)
-        self.history_list.setWordWrap(True)
-        self.history_list.itemDoubleClicked.connect(self._open_history_output_file)
-        self.history_list.currentItemChanged.connect(lambda *_: self._update_history_buttons())
+        self.history_tree = QTreeWidget()
+        self.history_tree.setObjectName("HistoryTree")
+        self.history_tree.setColumnCount(3)
+        self.history_tree.setHeaderLabels(("类型", "输出目录", "时间 / 状态"))
+        history_header = self.history_tree.header()
+        history_header.setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
+        history_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        history_header.setSectionResizeMode(
+            2,
+            QHeaderView.ResizeMode.ResizeToContents,
+        )
+        self.history_tree.setMaximumHeight(230)
+        self.history_tree.setRootIsDecorated(True)
+        self.history_tree.setItemsExpandable(True)
+        self.history_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.history_tree.itemDoubleClicked.connect(self._open_history_output_file)
+        self.history_tree.currentItemChanged.connect(lambda *_: self._update_history_buttons())
 
         self.history_open_button = QPushButton("打开记录文件")
         self.history_open_button.setObjectName("SecondaryAction")
@@ -1004,7 +1021,7 @@ class MainWindow(QMainWindow):
         history_actions.addStretch(1)
 
         self.history_section.content_layout.addWidget(
-            self.history_list,
+            self.history_tree,
             0,
             0,
             1,
@@ -2162,6 +2179,7 @@ class MainWindow(QMainWindow):
         record = ConversionHistoryRecord(
             record_id=uuid4().hex,
             timestamp=datetime.now().astimezone().isoformat(timespec="seconds"),
+            source_key=result.source_key,
             source_path=result.source_path,
             output_path=result.output_path,
             output_format=result.output_format or result.output_path.suffix.lstrip(".").upper(),
@@ -2182,33 +2200,54 @@ class MainWindow(QMainWindow):
         self._refresh_history_list(expand=True)
 
     def _refresh_history_list(self, expand: bool = False) -> None:
-        self.history_list.clear()
+        self.history_tree.clear()
+        grouped: dict[str, list[ConversionHistoryRecord]] = {}
         for record in self.history_records:
-            try:
-                timestamp = datetime.fromisoformat(record.timestamp).strftime("%m-%d %H:%M")
-            except ValueError:
-                timestamp = record.timestamp
+            grouped.setdefault(record.source_key, []).append(record)
 
-            size_text = (
-                f" · {format_file_size(record.file_size)}" if record.file_size is not None else ""
-            )
-            item = QListWidgetItem(
-                f"{record.source_name}  →  {record.output_format}\n"
-                f"{record.output_directory}\n"
-                f"{timestamp} · {record.status}{size_text}"
-            )
-            item.setData(Qt.ItemDataRole.UserRole, record.record_id)
-            item.setToolTip(
-                f"源文件：{record.source_path}\n"
-                f"输出文件：{record.output_path}\n"
-                f"转换类型：{record.output_format}\n"
-                f"状态：{record.status}" + (f"\n原因：{record.error}" if record.error else "")
-            )
-            self.history_list.addItem(item)
+        for records in grouped.values():
+            source = records[0]
+            group = QTreeWidgetItem([f"{source.source_name} ({len(records)})", "", ""])
+            group.setFirstColumnSpanned(True)
+            group.setToolTip(0, str(source.source_path))
+            group_font = group.font(0)
+            group_font.setBold(True)
+            group.setFont(0, group_font)
+
+            for record in records:
+                try:
+                    timestamp = datetime.fromisoformat(record.timestamp).strftime("%m-%d %H:%M")
+                except ValueError:
+                    timestamp = record.timestamp
+                size_text = (
+                    f" · {format_file_size(record.file_size)}"
+                    if record.file_size is not None
+                    else ""
+                )
+                child = QTreeWidgetItem(
+                    [
+                        record.output_format,
+                        str(record.output_directory),
+                        f"{timestamp} · {record.status}{size_text}",
+                    ]
+                )
+                child.setData(0, Qt.ItemDataRole.UserRole, record.record_id)
+                child.setToolTip(
+                    0,
+                    f"源文件：{record.source_path}\n"
+                    f"输出文件：{record.output_path}\n"
+                    f"转换类型：{record.output_format}\n"
+                    f"状态：{record.status}" + (f"\n原因：{record.error}" if record.error else ""),
+                )
+                group.addChild(child)
+            self.history_tree.addTopLevelItem(group)
+            group.setExpanded(True)
 
         self.history_section.setVisible(bool(self.history_records))
-        if self.history_records and self.history_list.currentItem() is None:
-            self.history_list.setCurrentRow(0)
+        if self.history_records and self.history_tree.currentItem() is None:
+            first_group = self.history_tree.topLevelItem(0)
+            if first_group is not None and first_group.childCount() > 0:
+                self.history_tree.setCurrentItem(first_group.child(0))
         if expand and self.history_records:
             self.history_section.toggle.setChecked(True)
             QTimer.singleShot(0, self._scroll_to_history)
@@ -2218,10 +2257,18 @@ class MainWindow(QMainWindow):
         self.preview_scroll.ensureWidgetVisible(self.history_section)
 
     def _selected_history_record(self) -> ConversionHistoryRecord | None:
-        item = self.history_list.currentItem()
+        return self._history_record_for_item(self.history_tree.currentItem())
+
+    def _history_record_for_item(
+        self,
+        item: QTreeWidgetItem | None,
+    ) -> ConversionHistoryRecord | None:
         if item is None:
             return None
-        record_id = str(item.data(Qt.ItemDataRole.UserRole))
+        record_id_value = item.data(0, Qt.ItemDataRole.UserRole)
+        if not record_id_value:
+            return None
+        record_id = str(record_id_value)
         return next(
             (record for record in self.history_records if record.record_id == record_id),
             None,
@@ -2235,9 +2282,13 @@ class MainWindow(QMainWindow):
         )
         self.history_clear_button.setEnabled(bool(self.history_records))
 
-    def _open_history_output_file(self, *args) -> None:
-        del args
-        record = self._selected_history_record()
+    def _open_history_output_file(
+        self,
+        item: QTreeWidgetItem | None = None,
+        column: int = 0,
+    ) -> None:
+        del column
+        record = self._history_record_for_item(item) or self._selected_history_record()
         if record is None or not record.output_path.is_file():
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(record.output_path)))
@@ -2334,20 +2385,35 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         task_key = str(item.data(Qt.ItemDataRole.UserRole))
-        task = self.tasks.pop(task_key, None)
-        if task is not None and task.status == TaskStatus.CONVERTING:
-            self.tasks[task_key] = task
+        task = self.tasks.get(task_key)
+        if task is None:
+            return
+        if task.status == TaskStatus.CONVERTING:
             self._show_footer_message(
                 "请先取消当前转换任务",
                 state="error",
                 timeout=4000,
             )
             return
+
+        history_records = self._history_records_for_source(task.content_signature)
+        history_action = "keep"
+        if history_records:
+            history_action = self._ask_history_delete(
+                len(history_records),
+                "该视频",
+            )
+            if history_action == "cancel":
+                return
+
+        self.tasks.pop(task_key, None)
         self.task_items.pop(task_key, None)
         self.probe_service.cancel_task(task_key)
         self.thumbnail_service.cancel_task(task_key)
-        if task is not None:
-            self.thumbnail_service.delete_cached(task.content_signature)
+        self.thumbnail_service.delete_cached(task.content_signature)
+        if history_action == "delete":
+            self.history_records = self.history_store.delete_by_source_key(task.content_signature)
+            self._refresh_history_list()
         self.task_list.takeItem(self.task_list.row(item))
         self._save_task_paths()
         self._update_task_actions()
@@ -2357,16 +2423,39 @@ class MainWindow(QMainWindow):
         del checked
         if not self.tasks:
             return
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("清空任务")
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(f"确定要移除队列中的 {len(self.tasks)} 个任务吗？")
-        clear_button = dialog.addButton("清空", QMessageBox.ButtonRole.AcceptRole)
-        cancel_button = dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        dialog.setDefaultButton(cancel_button)
-        dialog.exec()
-        if dialog.clickedButton() is not clear_button:
-            return
+        source_keys = {task.content_signature for task in self.tasks.values()}
+        history_count = sum(
+            1 for record in self.history_records if record.source_key in source_keys
+        )
+        history_action = "keep"
+        if history_count:
+            history_action = self._ask_history_delete(
+                history_count,
+                "队列中的视频",
+            )
+            if history_action == "cancel":
+                return
+        else:
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("清空任务")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText(f"确定要移除队列中的 {len(self.tasks)} 个任务吗？")
+            clear_button = dialog.addButton(
+                "清空",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            cancel_button = dialog.addButton(
+                "取消",
+                QMessageBox.ButtonRole.RejectRole,
+            )
+            dialog.setDefaultButton(cancel_button)
+            dialog.exec()
+            if dialog.clickedButton() is not clear_button:
+                return
+
+        if history_action == "delete" and source_keys:
+            self.history_records = self.history_store.delete_by_source_keys(source_keys)
+            self._refresh_history_list()
         if self.conversion_runner.is_running:
             self.conversion_runner.cancel()
         self.probe_service.cancel_all()
@@ -2379,6 +2468,38 @@ class MainWindow(QMainWindow):
         self._save_task_paths()
         self._update_task_actions()
         self._show_footer_message("任务队列已清空", timeout=4000)
+
+    def _history_records_for_source(
+        self,
+        source_key: str,
+    ) -> list[ConversionHistoryRecord]:
+        return [record for record in self.history_records if record.source_key == source_key]
+
+    def _ask_history_delete(self, count: int, subject: str) -> str:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("删除转换历史")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(f"{subject}有 {count} 条转换历史记录。删除任务时是否同时删除这些历史记录？")
+        history_button = dialog.addButton(
+            "删除任务和历史",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        task_button = dialog.addButton(
+            "仅删除任务",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        cancel_button = dialog.addButton(
+            "取消",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is history_button:
+            return "delete"
+        if clicked is task_button:
+            return "keep"
+        return "cancel"
 
     def _update_task_actions(self) -> None:
         has_tasks = bool(self.tasks)
