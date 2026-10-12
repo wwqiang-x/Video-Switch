@@ -1,7 +1,10 @@
 """Smoke tests for the desktop entry point and main interface shell."""
 
-from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+import time
+
+from PySide6.QtCore import QEvent, QMimeData, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent, QFont, QPixmap
+from PySide6.QtWidgets import QApplication
 
 from video_switch import main
 from video_switch.models.media_info import MediaInfo
@@ -18,6 +21,7 @@ from video_switch.ui.main_window import (
     TRASH_ICON_PATH,
     VIDEO_ICON_PATH,
     MainWindow,
+    MarqueeLineEdit,
     _tinted_svg_pixmap,
 )
 
@@ -109,6 +113,27 @@ def test_application_font_uses_full_hinting() -> None:
     assert font.family() == "Microsoft YaHei UI"
     assert font.pixelSize() == 13
     assert font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
+
+
+def test_marquee_line_edit_scrolls_and_resets(qtbot) -> None:
+    line = MarqueeLineEdit("很长的输出路径" * 20)
+    line.resize(100, 30)
+    line.show()
+    qtbot.addWidget(line)
+    qtbot.wait(10)
+
+    assert line.text().startswith("很长的输出路径")
+    assert line._max_offset > 0
+
+    line._offset = 0.0
+    line._last_tick = time.monotonic() - 0.1
+    line._advance_marquee()
+
+    assert line._offset > 0
+
+    QApplication.sendEvent(line, QEvent(QEvent.Type.Leave))
+
+    assert line._offset == 0.0
 
 
 def test_importing_video_updates_queue_and_preview(

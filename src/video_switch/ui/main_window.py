@@ -1,5 +1,6 @@
 """Main desktop window and step-one interface shell."""
 
+import time
 from math import ceil
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from PySide6.QtGui import (
     QGuiApplication,
     QIcon,
     QPainter,
+    QPalette,
     QPixmap,
 )
 from PySide6.QtSvg import QSvgRenderer
@@ -254,6 +256,87 @@ class AssetIconButton(QToolButton):
                 ),
             )
         painter.end()
+
+
+class MarqueeLineEdit(QLineEdit):
+    """Read-only line edit that continuously scrolls long text on hover."""
+
+    SCROLL_SPEED_PX_PER_SECOND = 46.0
+
+    def __init__(self, text: str = "") -> None:
+        super().__init__()
+        self._full_text = ""
+        self._offset = 0.0
+        self._max_offset = 0.0
+        self._last_tick = time.monotonic()
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._advance_marquee)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        super().setText("")
+        self._update_scroll_range()
+        self.update()
+
+    def text(self) -> str:
+        return self._full_text
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self._last_tick = time.monotonic()
+        if self._max_offset > 0:
+            self._timer.start()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self._timer.stop()
+        self._offset = 0.0
+        self.update()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_scroll_range()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._full_text:
+            return
+
+        painter = QPainter(self)
+        painter.setFont(self.font())
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        rect = self.contentsRect().adjusted(4, 0, -4, 0)
+        painter.setClipRect(rect)
+
+        metrics = QFontMetrics(self.font())
+        baseline = rect.y() + (rect.height() - metrics.height()) // 2 + metrics.ascent()
+        painter.drawText(
+            round(rect.x() - self._offset),
+            baseline,
+            self._full_text,
+        )
+        painter.end()
+
+    def _update_scroll_range(self) -> None:
+        text_width = QFontMetrics(self.font()).horizontalAdvance(self._full_text)
+        viewport_width = max(0, self.contentsRect().width() - 8)
+        self._max_offset = max(0.0, float(text_width - viewport_width))
+        if self._max_offset <= 0:
+            self._offset = 0.0
+            self._timer.stop()
+        elif self.underMouse():
+            self._timer.start()
+
+    def _advance_marquee(self) -> None:
+        now = time.monotonic()
+        elapsed = max(0.0, now - self._last_tick)
+        self._last_tick = now
+        self._offset += self.SCROLL_SPEED_PX_PER_SECOND * elapsed
+        if self._offset >= self._max_offset:
+            self._offset = 0.0
+        self.update()
 
 
 class AddVideoButton(QPushButton):
@@ -896,7 +979,7 @@ class MainWindow(QMainWindow):
         output_label.setObjectName("SectionLabel")
         output_row = QHBoxLayout()
         output_row.setSpacing(8)
-        self.output_path = QLineEdit("默认：源文件旁的 converted")
+        self.output_path = MarqueeLineEdit("默认：源文件旁的 converted")
         self.output_path.setReadOnly(True)
         self.browse_button = AssetIconButton(
             "AssetIconButton",
