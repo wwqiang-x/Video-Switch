@@ -10,6 +10,10 @@ from video_switch.services.ffmpeg_command import (
     build_ffmpeg_args,
     unique_output_path,
 )
+from video_switch.services.history_store import (
+    ConversionHistoryStore,
+    default_history_path,
+)
 from video_switch.services.media_probe import MediaProbeService, ProbeResult
 from video_switch.services.thumbnail import (
     ThumbnailResult,
@@ -28,6 +32,7 @@ __all__ = [
     "ConversionProgress",
     "ConversionResult",
     "ConversionRunner",
+    "ConversionHistoryStore",
     "MediaProbeService",
     "ProbeResult",
     "ThumbnailResult",
@@ -39,5 +44,6 @@ __all__ = [
     "build_command_preview",
     "build_ffmpeg_args",
     "default_thumbnail_cache_dir",
+    "default_history_path",
     "unique_output_path",
 ]

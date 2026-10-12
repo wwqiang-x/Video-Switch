@@ -1,8 +1,10 @@
 """Main desktop window and step-one interface shell."""
 
 import time
+from datetime import datetime
 from math import ceil
 from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import (
     QEvent,
@@ -61,6 +63,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from video_switch.models.conversion_history import ConversionHistoryRecord
 from video_switch.models.conversion_settings import (
     AUDIO_CODEC_OPTIONS,
     FORMAT_DEFAULTS,
@@ -77,6 +80,10 @@ from video_switch.services.ffmpeg_command import (
     QUALITY_DEFAULTS,
     build_command_preview,
     unique_output_path,
+)
+from video_switch.services.history_store import (
+    ConversionHistoryStore,
+    default_history_path,
 )
 from video_switch.services.media_probe import MediaProbeService, ProbeResult
 from video_switch.services.thumbnail import (
@@ -617,6 +624,8 @@ class MainWindow(QMainWindow):
         self.conversion_runner.progress.connect(self._on_conversion_progress)
         self.conversion_runner.log_line.connect(self._on_conversion_log)
         self.conversion_runner.finished.connect(self._on_conversion_finished)
+        self.history_store = ConversionHistoryStore(default_history_path())
+        self.history_records = self.history_store.load()
         self.toolchain_detector = ToolchainDetector(self)
         self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
         self.toolchain_detector.finished.connect(self._on_toolchain_detected)
@@ -629,6 +638,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._build_interface()
+        self._refresh_history_list()
         self._install_wheel_guards()
         self._load_conversion_settings()
         self._apply_theme()
@@ -831,6 +841,11 @@ class MainWindow(QMainWindow):
         self.preview_stage = QFrame()
         self.preview_stage.setObjectName("PreviewStage")
         self.preview_stage.setMinimumHeight(310)
+        self.preview_stage.setMaximumHeight(420)
+        self.preview_stage.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         preview_layout = QVBoxLayout(self.preview_stage)
         preview_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_layout.setSpacing(8)
@@ -963,13 +978,68 @@ class MainWindow(QMainWindow):
         )
         self.conversion_log_section.hide()
 
+        self.history_section = CollapsibleSection("转换历史")
+        self.history_list = QListWidget()
+        self.history_list.setObjectName("HistoryList")
+        self.history_list.setMaximumHeight(190)
+        self.history_list.setWordWrap(True)
+        self.history_list.itemDoubleClicked.connect(self._open_history_output_file)
+        self.history_list.currentItemChanged.connect(lambda *_: self._update_history_buttons())
+
+        self.history_open_button = QPushButton("打开记录文件")
+        self.history_open_button.setObjectName("SecondaryAction")
+        self.history_open_button.clicked.connect(self._open_history_output_file)
+        self.history_folder_button = QPushButton("打开记录目录")
+        self.history_folder_button.setObjectName("SecondaryAction")
+        self.history_folder_button.clicked.connect(self._open_history_output_folder)
+        self.history_clear_button = QPushButton("清空历史")
+        self.history_clear_button.setObjectName("SecondaryAction")
+        self.history_clear_button.clicked.connect(self._clear_history)
+
+        history_actions = QHBoxLayout()
+        history_actions.setSpacing(8)
+        history_actions.addWidget(self.history_open_button)
+        history_actions.addWidget(self.history_folder_button)
+        history_actions.addWidget(self.history_clear_button)
+        history_actions.addStretch(1)
+
+        self.history_section.content_layout.addWidget(
+            self.history_list,
+            0,
+            0,
+            1,
+            2,
+        )
+        self.history_section.content_layout.addLayout(
+            history_actions,
+            1,
+            0,
+            1,
+            2,
+        )
+        self.history_section.hide()
+
         layout.addLayout(heading)
         layout.addWidget(self.preview_stage, 1)
         layout.addWidget(metrics)
         layout.addWidget(source_row)
         layout.addWidget(self.conversion_progress_frame)
         layout.addWidget(self.conversion_log_section)
-        return panel
+        layout.addWidget(self.history_section)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("PreviewScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(panel)
+        self.preview_scroll = scroll
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.addWidget(scroll)
+        return container
 
     def _build_settings_panel(self) -> QWidget:
         panel = QWidget()
@@ -1940,10 +2010,13 @@ class MainWindow(QMainWindow):
         if task.status == TaskStatus.CONVERTING:
             return
 
+        settings = self._current_conversion_settings()
+        task.conversion_format = settings.output_format
+        task.conversion_summary = self._conversion_settings_summary(settings)
         try:
             self.conversion_runner.start(
                 task,
-                self._current_conversion_settings(),
+                settings,
                 self.output_directory,
                 ffmpeg_path,
             )
@@ -1957,6 +2030,17 @@ class MainWindow(QMainWindow):
                 state="error",
                 timeout=6000,
             )
+
+    @staticmethod
+    def _conversion_settings_summary(settings: ConversionSettings) -> str:
+        parts = [settings.output_format]
+        if settings.video_codec:
+            parts.append(settings.video_codec)
+        if settings.output_format in {"MP4", "MKV", "WebM"}:
+            parts.append(f"CRF {settings.crf}")
+        if settings.audio_codec:
+            parts.append(settings.audio_codec)
+        return " · ".join(parts)
 
     def _cancel_conversion(self) -> None:
         if not self.conversion_runner.is_running:
@@ -2007,6 +2091,7 @@ class MainWindow(QMainWindow):
             scroll_bar.setValue(scroll_bar.maximum())
 
     def _on_conversion_finished(self, result: ConversionResult) -> None:
+        self._record_conversion_history(result)
         task = self.tasks.get(result.task_key)
         if task is None:
             return
@@ -2059,6 +2144,134 @@ class MainWindow(QMainWindow):
         total_seconds = max(0, round(seconds))
         minutes, remaining_seconds = divmod(total_seconds, 60)
         return f"{minutes:02d}:{remaining_seconds:02d}"
+
+    def _record_conversion_history(self, result: ConversionResult) -> None:
+        if result.cancelled:
+            status = "已取消"
+        elif result.success:
+            status = "已完成"
+        else:
+            status = "失败"
+        file_size = None
+        if result.success and result.output_path.is_file():
+            try:
+                file_size = result.output_path.stat().st_size
+            except OSError:
+                file_size = None
+
+        record = ConversionHistoryRecord(
+            record_id=uuid4().hex,
+            timestamp=datetime.now().astimezone().isoformat(timespec="seconds"),
+            source_path=result.source_path,
+            output_path=result.output_path,
+            output_format=result.output_format or result.output_path.suffix.lstrip(".").upper(),
+            status=status,
+            error=result.error,
+            file_size=file_size,
+            elapsed_seconds=result.elapsed_seconds,
+        )
+        try:
+            self.history_records = self.history_store.add(record)
+        except OSError:
+            self._show_footer_message(
+                "转换已完成，但历史记录保存失败",
+                state="error",
+                timeout=6000,
+            )
+            return
+        self._refresh_history_list(expand=True)
+
+    def _refresh_history_list(self, expand: bool = False) -> None:
+        self.history_list.clear()
+        for record in self.history_records:
+            try:
+                timestamp = datetime.fromisoformat(record.timestamp).strftime("%m-%d %H:%M")
+            except ValueError:
+                timestamp = record.timestamp
+
+            size_text = (
+                f" · {format_file_size(record.file_size)}" if record.file_size is not None else ""
+            )
+            item = QListWidgetItem(
+                f"{record.source_name}  →  {record.output_format}\n"
+                f"{record.output_directory}\n"
+                f"{timestamp} · {record.status}{size_text}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, record.record_id)
+            item.setToolTip(
+                f"源文件：{record.source_path}\n"
+                f"输出文件：{record.output_path}\n"
+                f"转换类型：{record.output_format}\n"
+                f"状态：{record.status}" + (f"\n原因：{record.error}" if record.error else "")
+            )
+            self.history_list.addItem(item)
+
+        self.history_section.setVisible(bool(self.history_records))
+        if self.history_records and self.history_list.currentItem() is None:
+            self.history_list.setCurrentRow(0)
+        if expand and self.history_records:
+            self.history_section.toggle.setChecked(True)
+            QTimer.singleShot(0, self._scroll_to_history)
+        self._update_history_buttons()
+
+    def _scroll_to_history(self) -> None:
+        self.preview_scroll.ensureWidgetVisible(self.history_section)
+
+    def _selected_history_record(self) -> ConversionHistoryRecord | None:
+        item = self.history_list.currentItem()
+        if item is None:
+            return None
+        record_id = str(item.data(Qt.ItemDataRole.UserRole))
+        return next(
+            (record for record in self.history_records if record.record_id == record_id),
+            None,
+        )
+
+    def _update_history_buttons(self) -> None:
+        record = self._selected_history_record()
+        self.history_open_button.setEnabled(record is not None and record.output_path.is_file())
+        self.history_folder_button.setEnabled(
+            record is not None and record.output_directory.is_dir()
+        )
+        self.history_clear_button.setEnabled(bool(self.history_records))
+
+    def _open_history_output_file(self, *args) -> None:
+        del args
+        record = self._selected_history_record()
+        if record is None or not record.output_path.is_file():
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(record.output_path)))
+
+    def _open_history_output_folder(self) -> None:
+        record = self._selected_history_record()
+        if record is None or not record.output_directory.is_dir():
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(record.output_directory)))
+
+    def _clear_history(self) -> None:
+        if not self.history_records:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("清空转换历史")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText("确定清空全部转换历史记录吗？")
+        clear_button = dialog.addButton("清空", QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        if dialog.clickedButton() is not clear_button:
+            return
+        try:
+            self.history_store.clear()
+        except OSError as error:
+            self._show_footer_message(
+                f"清空历史失败：{error}",
+                state="error",
+                timeout=6000,
+            )
+            return
+        self.history_records = []
+        self._refresh_history_list()
 
     def _on_task_probe_started(self, task_key: str) -> None:
         task = self.tasks.get(task_key)

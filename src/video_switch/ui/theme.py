@@ -489,6 +489,11 @@ QListWidget::item:selected {{
     color: {palette.primary};
 }}
 
+QListWidget#HistoryList::item {{
+    min-height: 54px;
+    padding: 7px 8px;
+}}
+
 QScrollArea {{
     background: transparent;
     border: none;

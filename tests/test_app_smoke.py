@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from video_switch import main
 from video_switch.models.media_info import MediaInfo
+from video_switch.services.conversion_runner import ConversionResult
+from video_switch.services.history_store import ConversionHistoryStore
 from video_switch.services.media_probe import ProbeResult
 from video_switch.services.thumbnail import ThumbnailResult
 from video_switch.ui.fonts import create_application_font
@@ -326,3 +328,38 @@ def test_thumbnail_result_updates_preview(
     assert window.thumbnail_label.isHidden() is False
     assert window.thumbnail_label.pixmap().isNull() is False
     assert window.preview_hint.text() == "缩略图已生成"
+
+
+def test_conversion_history_record_is_added(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    source = tmp_path / "history-source.mp4"
+    output = tmp_path / "converted" / "history-source_converted.mkv"
+    output.parent.mkdir()
+    source.write_bytes(b"video")
+    output.write_bytes(b"converted")
+    window = MainWindow(settings=isolated_settings)
+    window.history_store = ConversionHistoryStore(tmp_path / "history.json")
+    window.history_records = []
+    qtbot.addWidget(window)
+
+    window._record_conversion_history(
+        ConversionResult(
+            task_key="task",
+            source_path=source,
+            output_format="MKV",
+            output_path=output,
+            success=True,
+            cancelled=False,
+            error=None,
+            log="",
+            elapsed_seconds=1.5,
+        )
+    )
+
+    assert len(window.history_records) == 1
+    assert window.history_list.count() == 1
+    assert "MKV" in window.history_list.item(0).text()
+    assert str(output.parent) in window.history_list.item(0).text()

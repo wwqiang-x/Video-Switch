@@ -41,6 +41,8 @@ class MediaTask:
     conversion_eta_seconds: float | None = None
     conversion_log: str = ""
     conversion_error: str | None = None
+    conversion_format: str | None = None
+    conversion_summary: str | None = None
 
     @property
     def display_name(self) -> str:
