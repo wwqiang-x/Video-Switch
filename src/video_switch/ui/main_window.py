@@ -1085,6 +1085,9 @@ class MainWindow(QMainWindow):
         self.history_folder_button = QPushButton("打开记录目录")
         self.history_folder_button.setObjectName("SecondaryAction")
         self.history_folder_button.clicked.connect(self._open_history_output_folder)
+        self.history_delete_button = QPushButton("删除选中历史")
+        self.history_delete_button.setObjectName("SecondaryAction")
+        self.history_delete_button.clicked.connect(self._delete_selected_history)
         self.history_clear_button = QPushButton("清空该视频历史")
         self.history_clear_button.setObjectName("SecondaryAction")
         self.history_clear_button.clicked.connect(self._clear_history)
@@ -1093,6 +1096,7 @@ class MainWindow(QMainWindow):
         history_actions.setSpacing(8)
         history_actions.addWidget(self.history_open_button)
         history_actions.addWidget(self.history_folder_button)
+        history_actions.addWidget(self.history_delete_button)
         history_actions.addWidget(self.history_clear_button)
         history_actions.addStretch(1)
 
@@ -2334,17 +2338,20 @@ class MainWindow(QMainWindow):
             size_text = (
                 f" · {format_file_size(record.file_size)}" if record.file_size is not None else ""
             )
+            elapsed_text = self._format_duration(record.elapsed_seconds)
             item = QListWidgetItem(
                 f"{record.output_format}  →  {record.output_path.name}\n"
                 f"{record.output_directory}\n"
-                f"{timestamp} · {record.status}{size_text}"
+                f"{timestamp} · {record.status}{size_text}\n"
+                f"转换耗时 {elapsed_text}"
             )
             item.setData(Qt.ItemDataRole.UserRole, record.record_id)
             item.setToolTip(
                 f"源文件：{record.source_path}\n"
                 f"输出文件：{record.output_path}\n"
                 f"转换类型：{record.output_format}\n"
-                f"状态：{record.status}" + (f"\n原因：{record.error}" if record.error else "")
+                f"状态：{record.status}\n"
+                f"转换耗时：{elapsed_text}" + (f"\n原因：{record.error}" if record.error else "")
             )
             self.history_list.addItem(item)
 
@@ -2375,6 +2382,7 @@ class MainWindow(QMainWindow):
         self.history_folder_button.setEnabled(
             record is not None and record.output_directory.is_dir()
         )
+        self.history_delete_button.setEnabled(record is not None)
         self.history_clear_button.setEnabled(bool(self.history_records))
 
     def _open_history_output_file(
@@ -2395,6 +2403,37 @@ class MainWindow(QMainWindow):
         if record is None or not record.output_directory.is_dir():
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(record.output_directory)))
+
+    def _delete_selected_history(self) -> None:
+        record = self._selected_history_record()
+        if record is None:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("删除历史记录")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(f"确定删除这条 {record.output_format} 转换历史吗？")
+        delete_button = dialog.addButton(
+            "删除",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_button = dialog.addButton(
+            "取消",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        if dialog.clickedButton() is not delete_button:
+            return
+        try:
+            self.history_records = self.history_store.delete_record(record.record_id)
+        except OSError as error:
+            self._show_footer_message(
+                f"删除历史失败：{error}",
+                state="error",
+                timeout=6000,
+            )
+            return
+        self._refresh_history_list()
 
     def _clear_history(self) -> None:
         task_key = self._current_task_key()

@@ -75,6 +75,11 @@ class ConversionHistoryStore:
         self._write(records)
         return records
 
+    def delete_record(self, record_id: str) -> list[ConversionHistoryRecord]:
+        records = [record for record in self.load() if record.record_id != record_id]
+        self._write(records)
+        return records
+
     def delete_by_source_keys(
         self,
         source_keys: set[str],

@@ -373,6 +373,7 @@ def test_conversion_history_record_is_added(
     item = window.history_list.item(0)
     assert "MKV" in item.text()
     assert str(output.parent) in item.text()
+    assert "转换耗时" in item.text()
 
 
 def test_removing_task_can_delete_associated_history(

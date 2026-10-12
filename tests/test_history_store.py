@@ -42,6 +42,9 @@ def test_history_store_round_trip(tmp_path: Path) -> None:
     records = store.delete_by_source_key("source-key")
     assert [record.record_id for record in records] == ["second"]
 
+    records = store.delete_record("second")
+    assert records == []
+
     store.clear()
     assert store.load() == []
 
