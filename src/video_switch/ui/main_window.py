@@ -1,5 +1,6 @@
 """Main desktop window and step-one interface shell."""
 
+import json
 import shutil
 import time
 from datetime import datetime
@@ -73,10 +74,12 @@ from video_switch.models.conversion_settings import (
 )
 from video_switch.models.media_task import MediaTask, TaskStatus
 from video_switch.services.conversion_runner import (
+    SEGMENT_DURATION_SECONDS,
     ConversionProgress,
     ConversionResult,
     ConversionRunner,
 )
+from video_switch.services.error_messages import SOURCE_MISSING, describe_probe_error
 from video_switch.services.ffmpeg_command import (
     QUALITY_DEFAULTS,
     build_command_preview,
@@ -134,6 +137,7 @@ FRAME_RATE_OPTIONS = ("保持原始", "30 FPS", "24 FPS", "60 FPS")
 AUDIO_BITRATE_OPTIONS = ("128 kbps", "192 kbps", "256 kbps", "320 kbps")
 NOT_APPLICABLE = "不适用"
 MESSAGE_ICON_SIZE = 44
+RESUME_DIRS_KEY = "conversion/resume_dirs"
 
 
 def _progress_percent(value: float) -> int:
@@ -1380,10 +1384,17 @@ class MainWindow(QMainWindow):
         self.batch_button.setToolTip("按当前设置依次转换队列中的全部视频")
         self.batch_button.clicked.connect(self._start_batch_conversion)
 
+        self.retry_button = QPushButton("重试失败项")
+        self.retry_button.setObjectName("SecondaryAction")
+        self.retry_button.setToolTip("只重新转换上一次失败的任务")
+        self.retry_button.clicked.connect(self._retry_failed_tasks)
+        self.retry_button.hide()
+
         bottom_actions = QHBoxLayout()
         bottom_actions.setSpacing(8)
-        bottom_actions.addWidget(self.start_button, 2)
+        bottom_actions.addWidget(self.start_button, 3)
         bottom_actions.addWidget(self.batch_button, 1)
+        bottom_actions.addWidget(self.retry_button, 1)
         bottom_actions.addWidget(self.cancel_button, 1)
 
         panel_layout.addLayout(heading)
@@ -1748,7 +1759,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 8")
+        stage_label = QLabel("开发阶段 · 步骤 9")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -1819,6 +1830,12 @@ class MainWindow(QMainWindow):
             return
         self._import_paths(paths, show_feedback=False, persist=False)
         self._save_task_paths()
+        restored = self._restore_resume_state()
+        if restored:
+            self._show_footer_message(
+                f"检测到 {restored} 个上次中断的转换，可点击“继续转换”接着完成",
+                timeout=10000,
+            )
 
     def _save_task_paths(self) -> None:
         self.settings.setValue(
@@ -2248,6 +2265,9 @@ class MainWindow(QMainWindow):
         self.batch_button.setToolTip(
             "批量转换进行中" if self.batch_running else "按当前设置依次转换队列中的全部视频"
         )
+        show_retry = not running and not self.batch_running and bool(self._failed_tasks())
+        self.retry_button.setVisible(show_retry)
+        self.retry_button.setEnabled(show_retry)
 
     def _start_conversion(self) -> None:
         if self.conversion_runner.is_running:
@@ -2259,6 +2279,19 @@ class MainWindow(QMainWindow):
             self._update_conversion_controls()
             return False
         if task.status == TaskStatus.CONVERTING:
+            return False
+        if not task.path.is_file():
+            task.status = TaskStatus.FAILED
+            task.conversion_error = SOURCE_MISSING
+            self._discard_conversion_parts(task)
+            self._update_task_item(task)
+            if self._current_task_key() == task.key:
+                self._apply_task_to_preview(task)
+            self._show_footer_message(
+                f"{task.display_name}：{SOURCE_MISSING}",
+                state="error",
+                timeout=8000,
+            )
             return False
 
         settings = self._current_conversion_settings()
@@ -2331,8 +2364,12 @@ class MainWindow(QMainWindow):
             if self._ask_batch_confirmation(selected):
                 break
         skipped = sum(1 for task in queued if task.media_info is None)
-        self.batch_pending = [task.key for task in selected]
-        self.batch_total = len(selected)
+        self._begin_batch([task.key for task in selected], skipped)
+
+    def _begin_batch(self, task_keys: list[str], skipped: int = 0) -> None:
+        """Start a batch run over the given task keys, in queue order."""
+        self.batch_pending = list(task_keys)
+        self.batch_total = len(task_keys)
         self.batch_index = 0
         self.batch_cancelled = False
         self.batch_counts = {
@@ -2346,6 +2383,33 @@ class MainWindow(QMainWindow):
         self._update_batch_progress()
         self._update_conversion_controls()
         self._start_next_batch_task()
+
+    def _failed_tasks(self) -> list[MediaTask]:
+        """Return queued tasks whose last conversion attempt failed."""
+        return [
+            task
+            for task in self._tasks_in_list_order()
+            if task.status == TaskStatus.FAILED and task.media_info is not None
+        ]
+
+    def _retry_failed_tasks(self) -> None:
+        """Re-run only the tasks that failed, with the current settings."""
+        if self.batch_running or self.conversion_runner.is_running:
+            return
+        failed = self._failed_tasks()
+        if not failed:
+            self._show_footer_message("队列中没有失败的转换任务", timeout=4000)
+            return
+        if self._available_ffmpeg_path() is None:
+            self._show_footer_message(
+                "FFmpeg 环境未就绪，无法重试",
+                state="error",
+                timeout=6000,
+            )
+            return
+        if not self._ask_batch_confirmation(failed):
+            return
+        self._begin_batch([task.key for task in failed])
 
     def _ask_batch_selection(self, queued: list[MediaTask]) -> set[str] | None:
         """Show the checkbox dialog and return the chosen task keys."""
@@ -2587,8 +2651,7 @@ class MainWindow(QMainWindow):
         """True once a resumable cancellation has at least one finished segment."""
         return task.conversion_resumable and task.conversion_parts_completed > 0
 
-    @staticmethod
-    def _discard_conversion_parts(task: MediaTask) -> None:
+    def _discard_conversion_parts(self, task: MediaTask) -> None:
         """Remove leftover segment files and their bookkeeping."""
         if task.conversion_part_dir is not None:
             shutil.rmtree(task.conversion_part_dir, ignore_errors=True)
@@ -2596,6 +2659,81 @@ class MainWindow(QMainWindow):
         task.conversion_parts_completed = 0
         task.conversion_settings_key = ""
         task.conversion_resumable = False
+        self._forget_resume_dir(task.content_signature)
+
+    def _resume_map(self) -> dict[str, dict[str, object]]:
+        """Read the persisted ``源视频 -> 分段目录`` table."""
+        raw = self.settings.value(RESUME_DIRS_KEY, "")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(payload, dict):
+                return {
+                    str(key): value for key, value in payload.items() if isinstance(value, dict)
+                }
+        return {}
+
+    def _write_resume_map(self, mapping: dict[str, dict[str, object]]) -> None:
+        self.settings.setValue(
+            RESUME_DIRS_KEY,
+            json.dumps(mapping, ensure_ascii=False) if mapping else "",
+        )
+
+    def _remember_resume_dir(self, task: MediaTask) -> None:
+        """Persist the segment directory so a restart can offer to continue."""
+        if task.conversion_part_dir is None:
+            return
+        mapping = self._resume_map()
+        mapping[task.content_signature] = {
+            "dir": str(task.conversion_part_dir),
+            "settings": task.conversion_settings_key,
+            "parts": task.conversion_parts_completed,
+        }
+        self._write_resume_map(mapping)
+
+    def _forget_resume_dir(self, source_key: str) -> None:
+        mapping = self._resume_map()
+        if mapping.pop(source_key, None) is not None:
+            self._write_resume_map(mapping)
+
+    def _restore_resume_state(self) -> int:
+        """Bring back the segments left behind by a conversion the app was closed on."""
+        mapping = self._resume_map()
+        if not mapping:
+            return 0
+        restored = 0
+        for task in self.tasks.values():
+            entry = mapping.get(task.content_signature)
+            if not isinstance(entry, dict):
+                continue
+            part_dir = Path(str(entry.get("dir", "")))
+            parts = [path for path in part_dir.glob("part_*") if path.is_file()]
+            if not parts:
+                self._forget_resume_dir(task.content_signature)
+                continue
+            if task.conversion_part_dir != part_dir:
+                task.conversion_part_dir = part_dir
+                task.conversion_settings_key = str(entry.get("settings", ""))
+                task.conversion_parts_completed = len(parts)
+                task.conversion_resumable = True
+                restored += 1
+            if task.media_info is None:
+                # ffprobe has not run yet; keep the queue state so it still gets read.
+                continue
+            task.status = TaskStatus.CANCELLED
+            task.conversion_error = "上次转换被中断，可点击“继续转换”接着完成"
+            duration = task.media_info.duration_seconds
+            if duration and duration > 0:
+                task.conversion_progress = min(
+                    99.9,
+                    len(parts) * SEGMENT_DURATION_SECONDS / duration * 100,
+                )
+            self._update_task_item(task)
+            if self._current_task_key() == task.key:
+                self._apply_task_to_preview(task)
+        return restored
 
     def _on_conversion_started(self, task_key: str, output_path: object) -> None:
         task = self.tasks.get(task_key)
@@ -2674,6 +2812,11 @@ class MainWindow(QMainWindow):
             task.status = TaskStatus.FAILED
             task.conversion_error = result.error or "转换失败"
             footer_message = f"转换失败：{task.display_name}"
+
+        if task.conversion_resumable and task.conversion_part_dir is not None:
+            self._remember_resume_dir(task)
+        else:
+            self._forget_resume_dir(task.content_signature)
 
         self._update_task_item(task)
         if self._current_task_key() == task.key:
@@ -2920,9 +3063,14 @@ class MainWindow(QMainWindow):
             self._queue_thumbnail_for_task(task)
         else:
             task.media_info = None
-            task.probe_error = result.error or "无法读取视频信息"
+            task.probe_error = describe_probe_error(
+                f"{result.raw_output or ''}\n{result.error or ''}",
+            )
             task.status = TaskStatus.FAILED
 
+        if task.conversion_resumable:
+            # The duration is known now, so the kept progress can be shown properly.
+            self._restore_resume_state()
         self._update_task_item(task)
         if self._current_task_key() == task.key:
             self._apply_task_to_preview(task)

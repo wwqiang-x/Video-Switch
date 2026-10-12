@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
 from video_switch.models.conversion_settings import ConversionSettings
 from video_switch.models.media_task import MediaTask
+from video_switch.services.error_messages import describe_conversion_error
 from video_switch.services.ffmpeg_command import (
     build_ffmpeg_args,
     unique_output_path,
@@ -460,7 +461,7 @@ class ConversionRunner(QObject):
             self._remove_output()
             self._emit_result(
                 cancelled=False,
-                error=self._last_log_line(log) or "FFmpeg 转换失败",
+                error=describe_conversion_error(log, "FFmpeg 转换失败"),
                 log=log,
                 elapsed=elapsed,
             )
@@ -480,7 +481,7 @@ class ConversionRunner(QObject):
             self._remove_current_part()
             self._emit_result(
                 cancelled=False,
-                error=self._last_log_line(log) or "分段转换失败",
+                error=describe_conversion_error(log, "分段转换失败"),
                 log=log,
                 elapsed=elapsed,
                 can_resume=bool(self._part_paths),
@@ -521,7 +522,7 @@ class ConversionRunner(QObject):
             self._remove_output()
             self._emit_result(
                 cancelled=False,
-                error=self._last_log_line(log) or "合并输出失败",
+                error=describe_conversion_error(log, "合并输出失败"),
                 log=log,
                 elapsed=elapsed,
                 can_resume=True,
@@ -606,10 +607,3 @@ class ConversionRunner(QObject):
             self._task.conversion_parts_completed = 0
             self._task.conversion_settings_key = ""
             self._task.conversion_resumable = False
-
-    @staticmethod
-    def _last_log_line(log: str) -> str:
-        for line in reversed(log.splitlines()):
-            if line.strip():
-                return line.strip()
-        return ""
