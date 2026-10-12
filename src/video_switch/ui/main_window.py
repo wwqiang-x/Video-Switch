@@ -100,6 +100,11 @@ from video_switch.services.video_importer import (
     format_file_size,
 )
 from video_switch.ui.advanced_help_dialog import AdvancedHelpDialog
+from video_switch.ui.batch_dialogs import (
+    BatchCandidate,
+    BatchConfirmDialog,
+    BatchSelectionDialog,
+)
 from video_switch.ui.fonts import register_cjk_fonts
 from video_switch.ui.format_help_dialog import FormatHelpDialog
 from video_switch.ui.settings_dialog import SettingsDialog
@@ -127,6 +132,13 @@ RESOLUTION_OPTIONS = ("保持原始", "1080p", "720p", "480p")
 FRAME_RATE_OPTIONS = ("保持原始", "30 FPS", "24 FPS", "60 FPS")
 AUDIO_BITRATE_OPTIONS = ("128 kbps", "192 kbps", "256 kbps", "320 kbps")
 NOT_APPLICABLE = "不适用"
+
+
+def _progress_percent(value: float) -> int:
+    """Clamp a progress value so a stray number can never break the progress bar."""
+    if value != value:  # NaN
+        return 0
+    return round(min(100.0, max(0.0, value)))
 
 
 def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap) -> QIcon:
@@ -704,6 +716,9 @@ class MainWindow(QMainWindow):
         self._footer_reset_timer = QTimer(self)
         self._footer_reset_timer.setSingleShot(True)
         self._footer_reset_timer.timeout.connect(self._restore_toolchain_status)
+        self._batch_watchdog = QTimer(self)
+        self._batch_watchdog.setInterval(400)
+        self._batch_watchdog.timeout.connect(self._check_batch_progress)
         self.probe_service = MediaProbeService(self)
         self.probe_service.task_started.connect(self._on_task_probe_started)
         self.probe_service.task_finished.connect(self._on_task_probe_finished)
@@ -720,6 +735,7 @@ class MainWindow(QMainWindow):
         self.conversion_runner.finished.connect(self._on_conversion_finished)
         self.history_store = ConversionHistoryStore(default_history_path())
         self.history_records = self.history_store.load()
+        self._history_source_key: str | None = None
         self.toolchain_detector = ToolchainDetector(self)
         self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
         self.toolchain_detector.finished.connect(self._on_toolchain_detected)
@@ -1548,14 +1564,19 @@ class MainWindow(QMainWindow):
         return ConversionSettings(
             output_format=self._selected_output_format(),
             quality=self.quality_combo.currentText(),
-            resolution=self.resolution_combo.currentText(),
-            frame_rate=self.frame_rate_combo.currentText(),
+            resolution=self._numeric_option(self.resolution_combo.currentText()),
+            frame_rate=self._numeric_option(self.frame_rate_combo.currentText()),
             video_codec=self.video_codec_combo.currentText(),
             audio_codec=self.audio_codec_combo.currentText(),
             audio_bitrate=self.audio_bitrate_combo.currentText(),
             crf=self.crf_spin.value(),
             keep_audio=self.keep_audio_checkbox.isChecked(),
         )
+
+    @staticmethod
+    def _numeric_option(value: str) -> str:
+        """Map disabled placeholder options back to the canonical "keep original" value."""
+        return "保持原始" if value == NOT_APPLICABLE else value
 
     def _load_conversion_settings(self) -> None:
         self._loading_conversion_settings = True
@@ -1873,6 +1894,9 @@ class MainWindow(QMainWindow):
         self._refresh_history_list()
 
     def _apply_task_to_preview(self, task: MediaTask) -> None:
+        # Bind the history panel first: a later failure must not leave it showing
+        # the records of the previously selected video.
+        self._sync_history_panel()
         info = task.media_info
         self.source_path.setText(str(task.path))
         self.preview_title.setText(task.display_name)
@@ -1927,6 +1951,14 @@ class MainWindow(QMainWindow):
         self.regenerate_thumbnail_button.setEnabled(info is not None)
         self._apply_conversion_to_preview(task)
         self._update_output_preview()
+
+    def _sync_history_panel(self) -> None:
+        """Keep the history panel bound to the current task, whatever happened before."""
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        source_key = task.content_signature if task is not None else None
+        if source_key != self._history_source_key:
+            self._refresh_history_list()
 
     def _apply_thumbnail_to_preview(self, task: MediaTask) -> None:
         thumbnail_path = task.thumbnail_path
@@ -2068,7 +2100,7 @@ class MainWindow(QMainWindow):
             has_conversion_state = False
         if has_conversion_state:
             self.conversion_progress_frame.show()
-            self.conversion_progress_bar.setValue(round(task.conversion_progress))
+            self.conversion_progress_bar.setValue(_progress_percent(task.conversion_progress))
         else:
             self.conversion_progress_frame.hide()
 
@@ -2143,6 +2175,7 @@ class MainWindow(QMainWindow):
             and task.media_info is not None
             and self._available_ffmpeg_path() is not None
             and not running
+            and not self.batch_running
         )
         self.start_button.setEnabled(can_start)
         if task is not None and task.status in {
@@ -2168,12 +2201,18 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(running)
         self.cancel_button.setEnabled(running)
         self.cancel_button.setText("取消全部" if self.batch_running else "取消转换")
-        self.start_button.setVisible(not self.batch_running)
-        self.batch_button.setVisible(not running or self.batch_running)
+        self.start_button.setVisible(True)
+        if self.batch_running:
+            self.start_button.setToolTip("批量转换进行中，请先取消或等待完成")
+        self.batch_button.setVisible(True)
         self.batch_button.setEnabled(
             not running
+            and not self.batch_running
             and self._available_ffmpeg_path() is not None
             and any(task.media_info is not None for task in self.tasks.values())
+        )
+        self.batch_button.setToolTip(
+            "批量转换进行中" if self.batch_running else "按当前设置依次转换队列中的全部视频"
         )
 
     def _start_conversion(self) -> None:
@@ -2222,7 +2261,7 @@ class MainWindow(QMainWindow):
         return ordered
 
     def _start_batch_conversion(self) -> None:
-        """Convert every queued video with the current settings, one at a time."""
+        """Ask which videos to convert, confirm the settings, then run them in order."""
         if self.batch_running or self.conversion_runner.is_running:
             return
         if self._available_ffmpeg_path() is None:
@@ -2234,9 +2273,14 @@ class MainWindow(QMainWindow):
             return
 
         queued = self._tasks_in_list_order()
-        ready = [task for task in queued if task.media_info is not None]
-        skipped = len(queued) - len(ready)
-        if not ready:
+        if not queued:
+            self._show_footer_message(
+                "任务队列为空，请先导入视频",
+                state="error",
+                timeout=6000,
+            )
+            return
+        if not any(task.media_info is not None for task in queued):
             self._show_footer_message(
                 "队列中没有可转换的视频，请等待媒体信息读取完成",
                 state="error",
@@ -2244,22 +2288,17 @@ class MainWindow(QMainWindow):
             )
             return
 
-        completed = [task for task in ready if task.status == TaskStatus.COMPLETED]
-        if completed:
-            scope = self._ask_batch_scope(len(ready), len(completed))
-            if scope == "cancel":
+        selected: list[MediaTask] = []
+        while True:
+            chosen = self._ask_batch_selection(queued)
+            if chosen is None:
                 return
-            if scope == "pending":
-                ready = [task for task in ready if task.status != TaskStatus.COMPLETED]
-        if not ready:
-            self._show_footer_message(
-                "已完成的视频已跳过，没有需要转换的任务",
-                timeout=6000,
-            )
-            return
-
-        self.batch_pending = [task.key for task in ready]
-        self.batch_total = len(ready)
+            selected = [task for task in queued if task.key in chosen]
+            if self._ask_batch_confirmation(selected):
+                break
+        skipped = sum(1 for task in queued if task.media_info is None)
+        self.batch_pending = [task.key for task in selected]
+        self.batch_total = len(selected)
         self.batch_index = 0
         self.batch_cancelled = False
         self.batch_counts = {
@@ -2269,8 +2308,83 @@ class MainWindow(QMainWindow):
             "skipped": skipped,
         }
         self.batch_running = True
+        self._batch_watchdog.start()
         self._update_batch_progress()
         self._update_conversion_controls()
+        self._start_next_batch_task()
+
+    def _ask_batch_selection(self, queued: list[MediaTask]) -> set[str] | None:
+        """Show the checkbox dialog and return the chosen task keys."""
+        candidates = []
+        for task in queued:
+            if task.media_info is None:
+                reason = "媒体信息尚未读取完成，本次不参与批量转换"
+                detail = f"{task.extension} · {format_file_size(task.size_bytes)}"
+            else:
+                reason = ""
+                detail = (
+                    f"{task.extension} · {format_file_size(task.size_bytes)} · {task.status_text}"
+                )
+            candidates.append(
+                BatchCandidate(
+                    task_key=task.key,
+                    name=task.display_name,
+                    detail=detail,
+                    checked=task.status != TaskStatus.COMPLETED,
+                    reason=reason,
+                )
+            )
+        dialog = BatchSelectionDialog(candidates, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        chosen = dialog.selected_keys
+        return set(chosen) if chosen else None
+
+    def _ask_batch_confirmation(self, selected: list[MediaTask]) -> bool:
+        """Show the settings summary; return True when the user confirms."""
+        settings = self._current_conversion_settings()
+        output_directory = str(
+            self.output_directory
+            if self.output_directory is not None
+            else (selected[0].path.parent / "converted")
+        )
+        dialog = BatchConfirmDialog(
+            len(selected),
+            self._batch_settings_rows(settings),
+            output_directory,
+            self,
+        )
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
+    @staticmethod
+    def _batch_settings_rows(settings: ConversionSettings) -> list[tuple[str, str]]:
+        """Describe every setting the batch run will apply."""
+        rows = [
+            ("输出格式", settings.output_format),
+            ("画质", settings.quality),
+            ("分辨率", settings.resolution),
+            ("帧率", settings.frame_rate),
+        ]
+        if settings.video_codec:
+            rows.append(("视频编码", settings.video_codec))
+            rows.append(("CRF", str(settings.crf)))
+        if settings.output_format in {"GIF"}:
+            rows.append(("音频", "不适用"))
+        elif settings.keep_audio:
+            rows.append(("音频编码", settings.audio_codec))
+            if settings.audio_codec != "PCM":
+                rows.append(("音频码率", settings.audio_bitrate))
+        else:
+            rows.append(("音频", "不保留音频"))
+        return rows
+
+    def _check_batch_progress(self) -> None:
+        """Keep a batch moving even if one of its handlers failed mid-flight."""
+        if not self.batch_running:
+            self._batch_watchdog.stop()
+            return
+        if self.conversion_runner.is_running:
+            return
         self._start_next_batch_task()
 
     def _start_next_batch_task(self) -> None:
@@ -2309,6 +2423,7 @@ class MainWindow(QMainWindow):
         self.batch_pending.clear()
         self.batch_total = 0
         self.batch_index = 0
+        self._batch_watchdog.stop()
         self._update_batch_progress()
         self._update_conversion_controls()
         if aborted:
@@ -2330,6 +2445,7 @@ class MainWindow(QMainWindow):
 
     def _update_batch_progress(self) -> None:
         if not self.batch_running:
+            self.batch_progress_label.setText("")
             self.batch_progress_label.hide()
             return
         self.batch_progress_label.setText(f"批量 {self.batch_index}/{self.batch_total}")
@@ -2340,25 +2456,6 @@ class MainWindow(QMainWindow):
         if not self.batch_running:
             return
         self._finish_batch(aborted=True)
-
-    def _ask_batch_scope(self, total: int, completed: int) -> str:
-        """Ask whether finished videos should be converted again."""
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("批量转换")
-        dialog.setIcon(QMessageBox.Icon.Question)
-        dialog.setText(f"队列中有 {total} 个可转换任务，其中 {completed} 个已完成转换。")
-        dialog.setInformativeText("重新转换会按当前设置生成新的输出文件，不会覆盖已有文件。")
-        all_button = dialog.addButton("全部转换", QMessageBox.ButtonRole.AcceptRole)
-        pending_button = dialog.addButton("跳过已完成", QMessageBox.ButtonRole.ActionRole)
-        dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        dialog.setDefaultButton(all_button)
-        dialog.exec()
-        clicked = dialog.clickedButton()
-        if clicked is all_button:
-            return "all"
-        if clicked is pending_button:
-            return "pending"
-        return "cancel"
 
     @staticmethod
     def _conversion_settings_summary(settings: ConversionSettings) -> str:
@@ -2497,7 +2594,7 @@ class MainWindow(QMainWindow):
         task = self.tasks.get(progress.task_key)
         if task is None:
             return
-        task.conversion_progress = progress.percent
+        task.conversion_progress = float(_progress_percent(progress.percent))
         task.conversion_speed = progress.speed
         task.conversion_eta_seconds = progress.eta_seconds
         self._update_task_item(task)
@@ -2620,6 +2717,7 @@ class MainWindow(QMainWindow):
         self.history_list.clear()
         task_key = self._current_task_key()
         task = self.tasks.get(task_key) if task_key else None
+        self._history_source_key = task.content_signature if task is not None else None
         records = (
             self._history_records_for_source(task.content_signature) if task is not None else []
         )

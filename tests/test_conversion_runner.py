@@ -7,6 +7,7 @@ from video_switch.services.conversion_runner import (
     ConversionRunner,
     build_progress,
     parse_ffmpeg_time,
+    parse_microseconds,
 )
 
 
@@ -46,6 +47,37 @@ def test_progress_end_is_complete() -> None:
 
     assert progress is not None
     assert progress.percent == 100.0
+
+
+def test_av_nopts_value_is_not_treated_as_progress() -> None:
+    """ffmpeg's first progress block reports AV_NOPTS_VALUE for every timestamp."""
+    sentinel = "-9223372036854775807"
+    progress = build_progress(
+        "task-key",
+        {
+            "bitrate": "  -0.0kbits/s",
+            "out_time_us": sentinel,
+            "out_time_ms": sentinel,
+            "out_time": "-577014:32:22.775807",
+            "speed": "N/A",
+            "progress": "continue",
+        },
+        duration_seconds=4.0,
+    )
+
+    assert progress is not None
+    assert progress.processed_seconds is None
+    assert progress.percent == 0.0
+    assert progress.eta_seconds is None
+
+
+def test_parse_microseconds_rejects_sentinels_and_garbage() -> None:
+    assert parse_microseconds("3984979") == 3.984979
+    assert parse_microseconds("-9223372036854775807") is None
+    assert parse_microseconds("-1") is None
+    assert parse_microseconds("N/A") is None
+    assert parse_microseconds("") is None
+    assert parse_microseconds(None) is None
 
 
 def test_cancel_uses_a_short_kill_fallback(qtbot) -> None:

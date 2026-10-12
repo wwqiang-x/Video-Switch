@@ -134,3 +134,39 @@ def test_estimate_conversion_seconds_uses_codec_and_workload() -> None:
     assert vp9 == 75.0
     assert lower_resolution is not None
     assert lower_resolution < h264
+
+
+def test_estimate_conversion_seconds_ignores_placeholder_options() -> None:
+    """Audio-only formats disable resolution and frame rate, which must not crash."""
+    settings = ConversionSettings(
+        output_format="MP3",
+        video_codec="",
+        audio_codec="MP3",
+        quality="不适用",
+        resolution="不适用",
+        frame_rate="不适用",
+        crf=0,
+    )
+
+    estimate = estimate_conversion_seconds(
+        settings,
+        duration_seconds=120.0,
+        source_height=1080,
+        source_frame_rate=30.0,
+    )
+
+    assert estimate == 4.8
+
+
+def test_estimate_conversion_seconds_accepts_valid_targets() -> None:
+    settings = ConversionSettings(resolution="720p", frame_rate="60 FPS")
+
+    estimate = estimate_conversion_seconds(
+        settings,
+        duration_seconds=60.0,
+        source_height=1080,
+        source_frame_rate=30.0,
+    )
+
+    assert estimate is not None
+    assert estimate > 0

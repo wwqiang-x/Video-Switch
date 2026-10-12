@@ -1,10 +1,15 @@
 """Tests for conversion settings UI behavior."""
 
+from video_switch.models.conversion_history import ConversionHistoryRecord
 from video_switch.models.media_info import MediaInfo
 from video_switch.models.media_task import TaskStatus
-from video_switch.services.conversion_runner import ConversionResult, ConversionRunner
+from video_switch.services.conversion_runner import (
+    ConversionProgress,
+    ConversionResult,
+    ConversionRunner,
+)
 from video_switch.services.history_store import ConversionHistoryStore
-from video_switch.ui.main_window import MainWindow
+from video_switch.ui.main_window import MainWindow, _progress_percent
 
 
 def test_default_conversion_command_is_mp4(qtbot, isolated_settings) -> None:
@@ -467,3 +472,147 @@ def test_cancel_updates_the_row_immediately(
     assert window.conversion_status_label.text() == "正在取消"
     assert window.cancel_button.isEnabled() is False
     assert cancelled == [True]
+
+
+def test_audio_only_format_never_leaks_placeholders_into_settings(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    """MP3 disables resolution and frame rate; the estimate must still work."""
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+
+    window.format_buttons["MP3"].click()
+    settings = window._current_conversion_settings()
+
+    assert window.resolution_combo.currentText() == "不适用"
+    assert settings.resolution == "保持原始"
+    assert settings.frame_rate == "保持原始"
+
+    window._apply_task_to_preview(task)
+
+    assert "约" in window.duration_estimate_label.text()
+
+
+def test_history_panel_follows_the_selected_task(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window = MainWindow(settings=isolated_settings)
+    qtbot.addWidget(window)
+    window.history_store = ConversionHistoryStore(tmp_path / "history.json")
+    window.history_records = []
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    first.write_bytes(b"first video")
+    second.write_bytes(b"second video")
+    window._import_paths([str(first), str(second)], show_feedback=False, persist=False)
+    tasks = window._tasks_in_list_order()
+    window.history_records = [
+        ConversionHistoryRecord(
+            record_id="r1",
+            timestamp="2026-10-12T22:45:16+08:00",
+            source_key=tasks[0].content_signature,
+            source_path=tasks[0].path,
+            output_path=tmp_path / "first_converted.mp4",
+            output_format="MP4",
+            status="已完成",
+            error=None,
+            file_size=10,
+            elapsed_seconds=1.0,
+        )
+    ]
+    window._refresh_history_list()
+
+    window.task_list.setCurrentItem(window.task_items[tasks[0].key])
+
+    assert window.history_section.title_label.text().endswith("first.mp4")
+    assert window.history_list.count() == 1
+    assert window.history_section.isVisibleTo(window) is True
+
+    window.task_list.setCurrentItem(window.task_items[tasks[1].key])
+
+    assert window.history_section.title_label.text().endswith("second.mp4")
+    assert window.history_list.count() == 0
+    assert window.history_section.isVisibleTo(window) is False
+
+
+def test_history_panel_is_bound_before_the_preview_is_built(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+    monkeypatch,
+) -> None:
+    """History switches first, so a later preview failure cannot leave it stale."""
+    window = MainWindow(settings=isolated_settings)
+    qtbot.addWidget(window)
+    window.history_store = ConversionHistoryStore(tmp_path / "history.json")
+    window.history_records = []
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    first.write_bytes(b"first video")
+    second.write_bytes(b"second video")
+    window._import_paths([str(first), str(second)], show_feedback=False, persist=False)
+    tasks = window._tasks_in_list_order()
+    window.history_records = [
+        ConversionHistoryRecord(
+            record_id="r1",
+            timestamp="2026-10-12T22:45:16+08:00",
+            source_key=tasks[0].content_signature,
+            source_path=tasks[0].path,
+            output_path=tmp_path / "first_converted.mp4",
+            output_format="MP4",
+            status="已完成",
+            error=None,
+            file_size=10,
+            elapsed_seconds=1.0,
+        )
+    ]
+    window._refresh_history_list()
+    window.task_list.setCurrentItem(window.task_items[tasks[0].key])
+
+    observed: list[str] = []
+
+    def record_title(self: MainWindow) -> None:
+        observed.append(window.history_section.title_label.text())
+
+    monkeypatch.setattr(MainWindow, "_update_output_preview", record_title)
+
+    window.task_list.setCurrentItem(window.task_items[tasks[1].key])
+
+    assert observed
+    assert observed[-1].endswith("second.mp4")
+    assert window.history_section.title_label.text().endswith("second.mp4")
+    assert window.history_list.count() == 0
+
+
+def test_progress_percent_is_clamped() -> None:
+    assert _progress_percent(-230584300921369.38) == 0
+    assert _progress_percent(float("inf")) == 100
+    assert _progress_percent(float("-inf")) == 0
+    assert _progress_percent(float("nan")) == 0
+    assert _progress_percent(41.6) == 42
+
+
+def test_bogus_progress_signal_does_not_break_the_progress_bar(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    task.status = TaskStatus.CONVERTING
+    window._apply_task_to_preview(task)
+
+    window._on_conversion_progress(
+        ConversionProgress(
+            task_key=task.key,
+            percent=-230584300921369.38,
+            processed_seconds=-9223372036854.775,
+            speed="N/A",
+            eta_seconds=None,
+        )
+    )
+
+    assert task.conversion_progress == 0.0
+    assert window.conversion_progress_bar.value() == 0

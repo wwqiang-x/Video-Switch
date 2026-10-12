@@ -70,6 +70,23 @@ def parse_speed(value: str) -> float | None:
         return None
 
 
+def _non_negative(value: float | None) -> float | None:
+    """Drop ``AV_NOPTS_VALUE`` sentinels and other negative timestamps."""
+    if value is None or value < 0:
+        return None
+    return value
+
+
+def parse_microseconds(value: str | None) -> float | None:
+    """Parse an ffmpeg microsecond timestamp, ignoring its "no value" sentinel."""
+    if not value:
+        return None
+    try:
+        return _non_negative(int(value) / 1_000_000)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def build_progress(
     task_key: str,
     data: dict[str, str],
@@ -80,19 +97,13 @@ def build_progress(
     if progress_value is None:
         return None
 
-    processed_seconds: float | None = None
-    if data.get("out_time_us"):
-        try:
-            processed_seconds = int(data["out_time_us"]) / 1_000_000
-        except ValueError:
-            processed_seconds = None
-    if processed_seconds is None and data.get("out_time_ms"):
-        try:
-            processed_seconds = int(data["out_time_ms"]) / 1_000_000
-        except ValueError:
-            processed_seconds = None
-    if processed_seconds is None and data.get("out_time"):
-        processed_seconds = parse_ffmpeg_time(data["out_time"])
+    # The first block ffmpeg emits carries AV_NOPTS_VALUE (-9223372036854775807)
+    # for every timestamp, which must never be treated as real progress.
+    processed_seconds = parse_microseconds(data.get("out_time_us"))
+    if processed_seconds is None:
+        processed_seconds = parse_microseconds(data.get("out_time_ms"))
+    if processed_seconds is None:
+        processed_seconds = _non_negative(parse_ffmpeg_time(data.get("out_time") or ""))
 
     if progress_value == "end":
         percent = 100.0
@@ -383,14 +394,17 @@ class ConversionRunner(QObject):
         if parsed is None:
             return
         segment_processed = parsed.processed_seconds or 0.0
-        total_processed = min(
-            self._total_duration,
-            self._completed_duration + segment_processed,
+        total_processed = max(
+            0.0,
+            min(
+                self._total_duration,
+                self._completed_duration + segment_processed,
+            ),
         )
         percent = (
             100.0
             if self._total_duration <= 0
-            else min(99.9, total_processed / self._total_duration * 100)
+            else min(99.9, max(0.0, total_processed / self._total_duration * 100))
         )
         speed_value = parse_speed(parsed.speed or "")
         eta = None

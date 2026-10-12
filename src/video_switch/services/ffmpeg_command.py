@@ -36,6 +36,21 @@ ENCODING_SPEED_FACTORS = {
 }
 
 
+def _target_height(value: str) -> int | None:
+    """Parse a resolution such as ``720p``, ignoring placeholders like ``不适用``."""
+    text = value.strip().removesuffix("p").strip()
+    return int(text) if text.isdigit() else None
+
+
+def _target_frame_rate(value: str) -> float | None:
+    """Parse a frame rate such as ``60 FPS``, ignoring placeholders like ``不适用``."""
+    text = value.strip().removesuffix("FPS").strip()
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def _ffmpeg_bitrate(value: str) -> str:
     """Convert a user-facing bitrate such as ``192 kbps`` to ``192k``."""
     number = value.split(maxsplit=1)[0]
@@ -171,13 +186,15 @@ def estimate_conversion_seconds(
         )
 
     if settings.resolution != "保持原始" and source_height:
-        target_height = int(settings.resolution.removesuffix("p"))
-        scale_factor = max(0.1, target_height / source_height)
-        encoding_speed /= max(0.1, scale_factor * scale_factor)
+        target_height = _target_height(settings.resolution)
+        if target_height:
+            scale_factor = max(0.1, target_height / source_height)
+            encoding_speed /= max(0.1, scale_factor * scale_factor)
 
     if settings.frame_rate != "保持原始" and source_frame_rate:
-        target_frame_rate = float(settings.frame_rate.removesuffix(" FPS"))
-        frame_rate_factor = max(0.1, target_frame_rate / source_frame_rate)
-        encoding_speed /= frame_rate_factor
+        target_frame_rate = _target_frame_rate(settings.frame_rate)
+        if target_frame_rate:
+            frame_rate_factor = max(0.1, target_frame_rate / source_frame_rate)
+            encoding_speed /= frame_rate_factor
 
     return max(1.0, duration_seconds / max(0.1, encoding_speed))
