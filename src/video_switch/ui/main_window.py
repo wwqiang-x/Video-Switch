@@ -204,9 +204,11 @@ class AssetIconButton(QToolButton):
         self.setFixedSize(34, 34)
         self.setIconSize(QSize(18, 18))
         self._hover_color = QColor("#e2e8f0")
+        self._icon_pixmap = QPixmap()
 
     def set_asset_icon(self, path: Path, color: str) -> None:
-        self.setIcon(QIcon(_tinted_svg_pixmap(path, color, 18, widget=self)))
+        self._icon_pixmap = _tinted_svg_pixmap(path, color, 18, widget=self)
+        self.setIcon(QIcon(self._icon_pixmap))
         self.update()
 
     def set_hover_color(self, color: str) -> None:
@@ -231,17 +233,26 @@ class AssetIconButton(QToolButton):
             painter.setBrush(self._hover_color)
             painter.drawRoundedRect(QRectF(3, 3, 30, 30), 7, 7)
 
-        icon = self.icon()
-        if not icon.isNull():
-            icon_size = self.iconSize()
-            icon_rect = QRect(
-                (self.width() - icon_size.width()) // 2,
-                (self.height() - icon_size.height()) // 2,
-                icon_size.width(),
-                icon_size.height(),
-            )
+        if not self._icon_pixmap.isNull():
+            icon_size = self._icon_pixmap.deviceIndependentSize().toSize()
+            icon_x = (self.width() - icon_size.width()) // 2
+            icon_y = (self.height() - icon_size.height()) // 2
             painter.setOpacity(1.0 if self.isEnabled() else 0.45)
-            icon.paint(painter, icon_rect)
+            painter.drawPixmap(
+                QRectF(
+                    icon_x,
+                    icon_y,
+                    icon_size.width(),
+                    icon_size.height(),
+                ),
+                self._icon_pixmap,
+                QRectF(
+                    0,
+                    0,
+                    self._icon_pixmap.width(),
+                    self._icon_pixmap.height(),
+                ),
+            )
         painter.end()
 
 
@@ -704,9 +715,10 @@ class MainWindow(QMainWindow):
         title.setObjectName("PanelTitle")
         self.media_status = QLabel("未选择")
         self.media_status.setObjectName("StatusChip")
-        self.regenerate_thumbnail_button = QToolButton()
-        self.regenerate_thumbnail_button.setObjectName("IconButton")
-        self.regenerate_thumbnail_button.setToolTip("重新生成缩略图")
+        self.regenerate_thumbnail_button = AssetIconButton(
+            "AssetIconButton",
+            "重新生成缩略图",
+        )
         self.regenerate_thumbnail_button.setEnabled(False)
         self.regenerate_thumbnail_button.hide()
         self.regenerate_thumbnail_button.clicked.connect(self._regenerate_thumbnail)
@@ -1879,13 +1891,11 @@ class MainWindow(QMainWindow):
         self.start_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_MediaPlay, palette.text)
         )
-        self.regenerate_thumbnail_button.setIcon(
-            _colored_icon(
-                self,
-                QStyle.StandardPixmap.SP_BrowserReload,
-                palette.text,
-            )
+        self.regenerate_thumbnail_button.set_asset_icon(
+            REFRESH_ICON_PATH,
+            palette.text,
         )
+        self.regenerate_thumbnail_button.set_hover_color(palette.help_hover)
         task_icon = self._task_icon()
         for index in range(self.task_list.count()):
             self.task_list.item(index).setIcon(task_icon)

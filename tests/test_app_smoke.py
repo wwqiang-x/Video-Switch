@@ -72,6 +72,8 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.task_stack.currentIndex() == 0
     assert window.start_button.isEnabled() is False
     assert window.regenerate_thumbnail_button.isHidden() is True
+    assert window.regenerate_thumbnail_button.width() == 34
+    assert window.regenerate_thumbnail_button.icon().isNull() is False
     assert window.preview_icon.pixmap().isNull() is False
     preview_size = window.preview_icon.pixmap().deviceIndependentSize()
     assert round(preview_size.width()) == 64
