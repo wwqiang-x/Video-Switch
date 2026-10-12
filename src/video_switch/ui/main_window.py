@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -76,6 +76,9 @@ QUESTION_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons"
 PLAY_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "play.svg"
 FILE_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "file.svg"
 VIDEO_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "video.svg"
+TRASH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "trash.svg"
+THEME_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "theme.svg"
+SETTINGS_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "settings.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -159,6 +162,57 @@ class HelpIconButton(QToolButton):
             painter.drawEllipse(QRectF(left, top, self._hover_diameter, self._hover_diameter))
             painter.end()
         super().paintEvent(event)
+
+
+class AssetIconButton(QToolButton):
+    """Toolbar button with a centered SVG icon and offset hover background."""
+
+    def __init__(self, object_name: str, tooltip: str) -> None:
+        super().__init__()
+        self.setObjectName(object_name)
+        self.setToolTip(tooltip)
+        self.setFixedSize(34, 34)
+        self.setIconSize(QSize(18, 18))
+        self._hover_color = QColor("#e2e8f0")
+
+    def set_asset_icon(self, path: Path, color: str) -> None:
+        self.setIcon(QIcon(_tinted_svg_pixmap(path, color, 18)))
+        self.update()
+
+    def set_hover_color(self, color: str) -> None:
+        self._hover_color = QColor(color)
+        self.update()
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if self.isEnabled() and self.underMouse():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._hover_color)
+            painter.drawRoundedRect(QRectF(3, 3, 30, 30), 7, 7)
+
+        icon = self.icon()
+        if not icon.isNull():
+            icon_size = self.iconSize()
+            icon_rect = QRect(
+                (self.width() - icon_size.width()) // 2,
+                (self.height() - icon_size.height()) // 2,
+                icon_size.width(),
+                icon_size.height(),
+            )
+            painter.setOpacity(1.0 if self.isEnabled() else 0.45)
+            icon.paint(painter, icon_rect)
+        painter.end()
 
 
 def _panel() -> tuple[QFrame, QVBoxLayout]:
@@ -418,20 +472,23 @@ class MainWindow(QMainWindow):
         self.add_video_button.setIconSize(QSize(15, 15))
         self.add_video_button.clicked.connect(self._choose_videos)
 
-        self.clear_button = QToolButton()
-        self.clear_button.setObjectName("IconButton")
-        self.clear_button.setToolTip("清空全部任务")
+        self.clear_button = AssetIconButton(
+            "AssetIconButton",
+            "清空全部任务",
+        )
         self.clear_button.setEnabled(False)
         self.clear_button.clicked.connect(self._clear_queue)
 
-        self.theme_button = QToolButton()
-        self.theme_button.setObjectName("IconButton")
-        self.theme_button.setIcon(_icon(self, QStyle.StandardPixmap.SP_ComputerIcon))
+        self.theme_button = AssetIconButton(
+            "AssetIconButton",
+            "切换主题",
+        )
         self.theme_button.clicked.connect(self._toggle_theme)
 
-        self.settings_button = QToolButton()
-        self.settings_button.setObjectName("IconButton")
-        self.settings_button.setToolTip("应用设置")
+        self.settings_button = AssetIconButton(
+            "AssetIconButton",
+            "应用设置",
+        )
         self.settings_button.clicked.connect(self._open_settings)
 
         layout.addWidget(brand_mark)
@@ -1664,19 +1721,12 @@ class MainWindow(QMainWindow):
 
     def _apply_icon_theme(self, palette: ThemePalette) -> None:
         self.add_video_button.setIcon(QIcon(_tinted_svg_pixmap(VIDEO_ICON_PATH, "#ffffff", 15)))
-        self.clear_button.setIcon(
-            _colored_icon(self, QStyle.StandardPixmap.SP_TrashIcon, palette.muted)
-        )
-        self.theme_button.setIcon(
-            _colored_icon(self, QStyle.StandardPixmap.SP_ComputerIcon, palette.text)
-        )
-        self.settings_button.setIcon(
-            _colored_icon(
-                self,
-                QStyle.StandardPixmap.SP_FileDialogDetailedView,
-                palette.text,
-            )
-        )
+        self.clear_button.set_asset_icon(TRASH_ICON_PATH, palette.text)
+        self.theme_button.set_asset_icon(THEME_ICON_PATH, palette.text)
+        self.settings_button.set_asset_icon(SETTINGS_ICON_PATH, palette.text)
+        self.clear_button.set_hover_color(palette.help_hover)
+        self.theme_button.set_hover_color(palette.help_hover)
+        self.settings_button.set_hover_color(palette.help_hover)
         self.empty_queue_icon.setPixmap(
             _tinted_svg_pixmap(
                 FILE_ICON_PATH,

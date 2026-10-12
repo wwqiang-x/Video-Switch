@@ -365,6 +365,13 @@ QToolButton#IconButton {{
     padding: 0;
 }}
 
+QToolButton#AssetIconButton {{
+    background: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}}
+
 QToolButton#IconButton:hover {{
     background: {palette.surface_hover};
     border-color: {palette.border};
