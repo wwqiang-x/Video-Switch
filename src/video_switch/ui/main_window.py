@@ -692,6 +692,12 @@ class MainWindow(QMainWindow):
         self.tasks: dict[str, MediaTask] = {}
         self.task_items: dict[str, QListWidgetItem] = {}
         self.output_directory: Path | None = None
+        self.batch_running = False
+        self.batch_cancelled = False
+        self.batch_pending: list[str] = []
+        self.batch_total = 0
+        self.batch_index = 0
+        self.batch_counts = {"success": 0, "failed": 0, "cancelled": 0, "skipped": 0}
         self._loading_conversion_settings = True
         self.format_help_dialog: FormatHelpDialog | None = None
         self.advanced_help_dialog: AdvancedHelpDialog | None = None
@@ -842,8 +848,12 @@ class MainWindow(QMainWindow):
         title.setObjectName("PanelTitle")
         self.queue_count = QLabel("0")
         self.queue_count.setObjectName("QueueCount")
+        self.batch_progress_label = QLabel("")
+        self.batch_progress_label.setProperty("muted", True)
+        self.batch_progress_label.hide()
         heading.addWidget(title)
         heading.addStretch(1)
+        heading.addWidget(self.batch_progress_label)
         heading.addWidget(self.queue_count)
 
         self.task_list = QListWidget()
@@ -1332,9 +1342,15 @@ class MainWindow(QMainWindow):
         self.cancel_button.hide()
         self.cancel_button.clicked.connect(self._cancel_conversion)
 
+        self.batch_button = QPushButton("批量转换")
+        self.batch_button.setObjectName("SecondaryAction")
+        self.batch_button.setToolTip("按当前设置依次转换队列中的全部视频")
+        self.batch_button.clicked.connect(self._start_batch_conversion)
+
         bottom_actions = QHBoxLayout()
         bottom_actions.setSpacing(8)
         bottom_actions.addWidget(self.start_button, 2)
+        bottom_actions.addWidget(self.batch_button, 1)
         bottom_actions.addWidget(self.cancel_button, 1)
 
         panel_layout.addLayout(heading)
@@ -1694,7 +1710,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 7")
+        stage_label = QLabel("开发阶段 · 步骤 8")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -2151,18 +2167,26 @@ class MainWindow(QMainWindow):
 
         self.cancel_button.setVisible(running)
         self.cancel_button.setEnabled(running)
+        self.cancel_button.setText("取消全部" if self.batch_running else "取消转换")
+        self.start_button.setVisible(not self.batch_running)
+        self.batch_button.setVisible(not running or self.batch_running)
+        self.batch_button.setEnabled(
+            not running
+            and self._available_ffmpeg_path() is not None
+            and any(task.media_info is not None for task in self.tasks.values())
+        )
 
     def _start_conversion(self) -> None:
         if self.conversion_runner.is_running:
-            return
+            return False
         task_key = self._current_task_key()
         task = self.tasks.get(task_key) if task_key else None
         ffmpeg_path = self._available_ffmpeg_path()
         if task is None or task.media_info is None or ffmpeg_path is None:
             self._update_conversion_controls()
-            return
+            return False
         if task.status == TaskStatus.CONVERTING:
-            return
+            return False
 
         settings = self._current_conversion_settings()
         task.conversion_format = settings.output_format
@@ -2184,6 +2208,157 @@ class MainWindow(QMainWindow):
                 state="error",
                 timeout=6000,
             )
+            return False
+        return True
+
+    def _tasks_in_list_order(self) -> list[MediaTask]:
+        """Return queued tasks in the order shown in the queue list."""
+        ordered: list[MediaTask] = []
+        for index in range(self.task_list.count()):
+            item = self.task_list.item(index)
+            task = self.tasks.get(str(item.data(Qt.ItemDataRole.UserRole)))
+            if task is not None:
+                ordered.append(task)
+        return ordered
+
+    def _start_batch_conversion(self) -> None:
+        """Convert every queued video with the current settings, one at a time."""
+        if self.batch_running or self.conversion_runner.is_running:
+            return
+        if self._available_ffmpeg_path() is None:
+            self._show_footer_message(
+                "FFmpeg 环境未就绪，无法批量转换",
+                state="error",
+                timeout=6000,
+            )
+            return
+
+        queued = self._tasks_in_list_order()
+        ready = [task for task in queued if task.media_info is not None]
+        skipped = len(queued) - len(ready)
+        if not ready:
+            self._show_footer_message(
+                "队列中没有可转换的视频，请等待媒体信息读取完成",
+                state="error",
+                timeout=6000,
+            )
+            return
+
+        completed = [task for task in ready if task.status == TaskStatus.COMPLETED]
+        if completed:
+            scope = self._ask_batch_scope(len(ready), len(completed))
+            if scope == "cancel":
+                return
+            if scope == "pending":
+                ready = [task for task in ready if task.status != TaskStatus.COMPLETED]
+        if not ready:
+            self._show_footer_message(
+                "已完成的视频已跳过，没有需要转换的任务",
+                timeout=6000,
+            )
+            return
+
+        self.batch_pending = [task.key for task in ready]
+        self.batch_total = len(ready)
+        self.batch_index = 0
+        self.batch_cancelled = False
+        self.batch_counts = {
+            "success": 0,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": skipped,
+        }
+        self.batch_running = True
+        self._update_batch_progress()
+        self._update_conversion_controls()
+        self._start_next_batch_task()
+
+    def _start_next_batch_task(self) -> None:
+        if not self.batch_running:
+            return
+        while self.batch_pending:
+            task_key = self.batch_pending.pop(0)
+            task = self.tasks.get(task_key)
+            item = self.task_items.get(task_key)
+            if task is None or item is None:
+                self.batch_counts["skipped"] += 1
+                continue
+            self.task_list.setCurrentItem(item)
+            self.batch_index += 1
+            self._update_batch_progress()
+            if self._start_conversion():
+                return
+            self.batch_counts["skipped"] += 1
+        self._finish_batch()
+
+    def _advance_batch(self, result: ConversionResult) -> None:
+        if result.success:
+            self.batch_counts["success"] += 1
+        elif result.cancelled:
+            self.batch_counts["cancelled"] += 1
+        else:
+            self.batch_counts["failed"] += 1
+        QTimer.singleShot(0, self._start_next_batch_task)
+
+    def _finish_batch(self, aborted: bool = False) -> None:
+        total = self.batch_total
+        counts = dict(self.batch_counts)
+        cancelled = self.batch_cancelled
+        self.batch_running = False
+        self.batch_cancelled = False
+        self.batch_pending.clear()
+        self.batch_total = 0
+        self.batch_index = 0
+        self._update_batch_progress()
+        self._update_conversion_controls()
+        if aborted:
+            return
+
+        details = [f"成功 {counts['success']}"]
+        if counts["failed"]:
+            details.append(f"失败 {counts['failed']}")
+        if counts["cancelled"]:
+            details.append(f"已取消 {counts['cancelled']}")
+        if counts["skipped"]:
+            details.append(f"跳过 {counts['skipped']}")
+        summary = " · ".join(details)
+        self._show_footer_message(
+            f"{'已取消批量转换' if cancelled else '批量转换完成'}（共 {total} 个）：{summary}",
+            state="error" if counts["failed"] else "ready",
+            timeout=10000,
+        )
+
+    def _update_batch_progress(self) -> None:
+        if not self.batch_running:
+            self.batch_progress_label.hide()
+            return
+        self.batch_progress_label.setText(f"批量 {self.batch_index}/{self.batch_total}")
+        self.batch_progress_label.show()
+
+    def _abort_batch(self) -> None:
+        """Drop batch bookkeeping, for example when the queue is cleared."""
+        if not self.batch_running:
+            return
+        self._finish_batch(aborted=True)
+
+    def _ask_batch_scope(self, total: int, completed: int) -> str:
+        """Ask whether finished videos should be converted again."""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("批量转换")
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setText(f"队列中有 {total} 个可转换任务，其中 {completed} 个已完成转换。")
+        dialog.setInformativeText("重新转换会按当前设置生成新的输出文件，不会覆盖已有文件。")
+        all_button = dialog.addButton("全部转换", QMessageBox.ButtonRole.AcceptRole)
+        pending_button = dialog.addButton("跳过已完成", QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(all_button)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is all_button:
+            return "all"
+        if clicked is pending_button:
+            return "pending"
+        return "cancel"
 
     @staticmethod
     def _conversion_settings_summary(settings: ConversionSettings) -> str:
@@ -2199,6 +2374,10 @@ class MainWindow(QMainWindow):
     def _cancel_conversion(self) -> None:
         if not self.conversion_runner.is_running:
             return
+        if self.batch_running:
+            self.batch_cancelled = True
+            self.batch_pending.clear()
+            self._update_batch_progress()
         self.cancel_button.setEnabled(False)
         self.conversion_status_label.setText("正在取消")
         self.conversion_runner.cancel()
@@ -2303,6 +2482,12 @@ class MainWindow(QMainWindow):
         self._update_task_item(task)
         if self._current_task_key() == task_key:
             self._apply_task_to_preview(task)
+        if self.batch_running:
+            self._show_footer_message(
+                f"批量转换 {self.batch_index}/{self.batch_total}：{task.display_name}",
+                timeout=0,
+            )
+            return
         self._show_footer_message(
             f"正在转换 {task.display_name}",
             timeout=0,
@@ -2334,6 +2519,8 @@ class MainWindow(QMainWindow):
         self._record_conversion_history(result)
         task = self.tasks.get(result.task_key)
         if task is None:
+            if self.batch_running:
+                self._advance_batch(result)
             return
         task.conversion_resumable = result.can_resume
         task.output_path = result.output_path
@@ -2362,6 +2549,9 @@ class MainWindow(QMainWindow):
             self._apply_task_to_preview(task)
         else:
             self._update_conversion_controls()
+        if self.batch_running:
+            self._advance_batch(result)
+            return
         self._show_footer_message(
             footer_message,
             details=task.conversion_error or "",
@@ -2659,6 +2849,11 @@ class MainWindow(QMainWindow):
 
         self.tasks.pop(task_key, None)
         self.task_items.pop(task_key, None)
+        if task_key in self.batch_pending:
+            self.batch_pending.remove(task_key)
+            self.batch_total -= 1
+            self.batch_counts["skipped"] += 1
+            self._update_batch_progress()
         self.probe_service.cancel_task(task_key)
         self.thumbnail_service.cancel_task(task_key)
         self.thumbnail_service.delete_cached(task.content_signature)
@@ -2710,6 +2905,7 @@ class MainWindow(QMainWindow):
             self._refresh_history_list()
         if self.conversion_runner.is_running:
             self.conversion_runner.cancel()
+        self._abort_batch()
         self.probe_service.cancel_all()
         self.thumbnail_service.cancel_all()
         for task in self.tasks.values():
