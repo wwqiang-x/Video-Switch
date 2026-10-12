@@ -29,6 +29,7 @@ from PySide6.QtGui import (
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -612,6 +613,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._build_interface()
+        self._install_wheel_guards()
         self._load_conversion_settings()
         self._apply_theme()
         QTimer.singleShot(0, self._restore_saved_tasks)
@@ -1892,6 +1894,20 @@ class MainWindow(QMainWindow):
         self.status_dot.setProperty("state", state)
         self.status_dot.style().unpolish(self.status_dot)
         self.status_dot.style().polish(self.status_dot)
+
+    def _install_wheel_guards(self) -> None:
+        controls = self.findChildren(QComboBox) + self.findChildren(QAbstractSpinBox)
+        for control in controls:
+            control.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Wheel and isinstance(
+            watched,
+            (QComboBox, QAbstractSpinBox),
+        ):
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
 
     def _show_format_help(self) -> None:
         if self.format_help_dialog is None:

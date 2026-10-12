@@ -2,8 +2,8 @@
 
 import time
 
-from PySide6.QtCore import QEvent, QMimeData, QPointF, Qt, QUrl
-from PySide6.QtGui import QDropEvent, QFont, QPixmap
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl
+from PySide6.QtGui import QDropEvent, QFont, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from video_switch import main
@@ -134,6 +134,30 @@ def test_marquee_line_edit_scrolls_and_resets(qtbot) -> None:
     QApplication.sendEvent(line, QEvent(QEvent.Type.Leave))
 
     assert line._offset == 0.0
+
+
+def test_mouse_wheel_does_not_change_settings(
+    qtbot,
+    isolated_settings,
+) -> None:
+    window = MainWindow(settings=isolated_settings)
+    qtbot.addWidget(window)
+    original_index = window.quality_combo.currentIndex()
+    wheel_event = QWheelEvent(
+        QPointF(5, 5),
+        QPointF(5, 5),
+        QPoint(),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+
+    handled = window.eventFilter(window.quality_combo, wheel_event)
+
+    assert handled is True
+    assert window.quality_combo.currentIndex() == original_index
 
 
 def test_importing_video_updates_queue_and_preview(
