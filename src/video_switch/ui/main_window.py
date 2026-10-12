@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QPainter,
     QPixmap,
 )
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -72,6 +73,7 @@ from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 
 APP_NAME = "Video Switch"
 QUESTION_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "question.svg"
+PLAY_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "play.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -91,6 +93,20 @@ def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap) -> QIcon:
 def _question_icon() -> QIcon:
     """Return the bundled vector question icon."""
     return QIcon(str(QUESTION_ICON_PATH))
+
+
+def _tinted_svg_pixmap(path: Path, color: str, size: int) -> QPixmap:
+    """Render an SVG at a fixed square size and tint it to a theme color."""
+    renderer = QSvgRenderer(str(path))
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    renderer.render(painter, QRectF(0, 0, size, size))
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(), QColor(color))
+    painter.end()
+    return pixmap
 
 
 def _colored_icon(
@@ -529,6 +545,7 @@ class MainWindow(QMainWindow):
         self.preview_icon = QLabel()
         self.preview_icon.setObjectName("StageIcon")
         self.preview_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_icon.setFixedSize(72, 72)
 
         self.preview_title = ElidedLabel("拖入视频文件")
         self.preview_title.setObjectName("PreviewTitle")
@@ -550,7 +567,11 @@ class MainWindow(QMainWindow):
         preview_message_layout.setContentsMargins(0, 0, 0, 0)
         preview_message_layout.setSpacing(7)
         preview_message_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        preview_message_layout.addWidget(self.preview_icon)
+        preview_message_layout.addWidget(
+            self.preview_icon,
+            0,
+            Qt.AlignmentFlag.AlignHCenter,
+        )
         preview_message_layout.addWidget(self.preview_title)
         preview_message_layout.addWidget(self.preview_hint)
 
@@ -1664,12 +1685,11 @@ class MainWindow(QMainWindow):
             ).pixmap(42, 42)
         )
         self.preview_icon.setPixmap(
-            _colored_icon(
-                self,
-                QStyle.StandardPixmap.SP_MediaPlay,
+            _tinted_svg_pixmap(
+                PLAY_ICON_PATH,
                 palette.preview_muted,
-                54,
-            ).pixmap(54, 54)
+                64,
+            )
         )
         self.browse_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_DirOpenIcon, palette.text)
