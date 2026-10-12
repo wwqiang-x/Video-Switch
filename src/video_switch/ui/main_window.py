@@ -65,6 +65,7 @@ from video_switch.services.video_importer import (
     format_file_size,
 )
 from video_switch.ui.fonts import register_cjk_fonts
+from video_switch.ui.format_help_dialog import FormatHelpDialog
 from video_switch.ui.settings_dialog import SettingsDialog
 from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 
@@ -241,6 +242,7 @@ class MainWindow(QMainWindow):
         self.task_items: dict[str, QListWidgetItem] = {}
         self.output_directory: Path | None = None
         self._loading_conversion_settings = True
+        self.format_help_dialog: FormatHelpDialog | None = None
         self._footer_reset_timer = QTimer(self)
         self._footer_reset_timer.setSingleShot(True)
         self._footer_reset_timer.timeout.connect(self._restore_toolchain_status)
@@ -565,6 +567,18 @@ class MainWindow(QMainWindow):
 
         format_label = QLabel("目标格式")
         format_label.setObjectName("SectionLabel")
+        self.format_help_button = QToolButton()
+        self.format_help_button.setObjectName("HelpIconButton")
+        self.format_help_button.setText("?")
+        self.format_help_button.setToolTip("查看输出格式说明")
+        self.format_help_button.setFixedSize(22, 22)
+        self.format_help_button.clicked.connect(self._show_format_help)
+        format_header = QHBoxLayout()
+        format_header.setContentsMargins(0, 0, 0, 0)
+        format_header.setSpacing(7)
+        format_header.addWidget(format_label)
+        format_header.addWidget(self.format_help_button)
+        format_header.addStretch(1)
         format_grid = QGridLayout()
         format_grid.setContentsMargins(0, 0, 0, 0)
         format_grid.setHorizontalSpacing(8)
@@ -657,7 +671,7 @@ class MainWindow(QMainWindow):
         self.command_preview.setMaximumHeight(110)
         command_section.content_layout.addWidget(self.command_preview, 0, 0, 1, 2)
 
-        content_layout.addWidget(format_label)
+        content_layout.addLayout(format_header)
         content_layout.addLayout(format_grid)
         content_layout.addLayout(basic_form)
         content_layout.addSpacing(2)
@@ -1512,6 +1526,13 @@ class MainWindow(QMainWindow):
         self.status_dot.setProperty("state", state)
         self.status_dot.style().unpolish(self.status_dot)
         self.status_dot.style().polish(self.status_dot)
+
+    def _show_format_help(self) -> None:
+        if self.format_help_dialog is None:
+            self.format_help_dialog = FormatHelpDialog(self)
+        self.format_help_dialog.show()
+        self.format_help_dialog.raise_()
+        self.format_help_dialog.activateWindow()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(

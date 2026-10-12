@@ -99,6 +99,10 @@ QDialog {{
     background: {palette.app_bg};
 }}
 
+QDialog#FormatHelpDialog {{
+    background: {palette.app_bg};
+}}
+
 QMessageBox {{
     background: {palette.surface};
 }}
@@ -167,6 +171,12 @@ QLabel#PanelTitle {{
     font-weight: 700;
 }}
 
+QLabel#DialogTitle {{
+    color: {palette.text};
+    font-size: 18px;
+    font-weight: 700;
+}}
+
 QLabel#PanelSubtitle,
 QLabel[muted="true"] {{
     color: {palette.muted};
@@ -221,6 +231,48 @@ QLabel#QueueCount {{
     font-size: 12px;
     font-weight: 650;
     padding: 2px 8px;
+}}
+
+QToolButton#HelpIconButton {{
+    background: #111827;
+    border: 1px solid {palette.border_strong};
+    border-radius: 11px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 800;
+    padding: 0;
+}}
+
+QToolButton#HelpIconButton:hover {{
+    background: #374151;
+}}
+
+QFrame#FormatCard {{
+    background: {palette.surface};
+    border: 1px solid {palette.border};
+    border-radius: 8px;
+}}
+
+QLabel#FormatBadge {{
+    background: {palette.primary};
+    border-radius: 6px;
+    color: #ffffff;
+    font-weight: 700;
+}}
+
+QLabel#FormatCardTitle {{
+    color: {palette.text};
+    font-size: 14px;
+    font-weight: 700;
+}}
+
+QLabel#FormatUseCase {{
+    color: {palette.text};
+    font-weight: 600;
+}}
+
+QLabel#FormatNote {{
+    color: {palette.warning};
 }}
 
 QLabel#StageIcon {{
