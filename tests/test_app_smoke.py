@@ -50,7 +50,7 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     metrics = window.add_video_button.fontMetrics()
     expected_width = max(
         88,
-        4
+        8
         + metrics.height()
         + 6
         + metrics.horizontalAdvance("添加视频")
