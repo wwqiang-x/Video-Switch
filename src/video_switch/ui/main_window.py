@@ -1026,9 +1026,11 @@ class MainWindow(QMainWindow):
         self.conversion_status_label.setObjectName("SectionLabel")
         self.conversion_detail_label = ElidedLabel("--")
         self.conversion_detail_label.setProperty("muted", True)
+        self.conversion_detail_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         progress_heading.addWidget(self.conversion_status_label)
-        progress_heading.addStretch(1)
-        progress_heading.addWidget(self.conversion_detail_label)
+        progress_heading.addWidget(self.conversion_detail_label, 1)
 
         self.conversion_progress_bar = QProgressBar()
         self.conversion_progress_bar.setRange(0, 100)
@@ -2072,7 +2074,9 @@ class MainWindow(QMainWindow):
         elif task.status == TaskStatus.CANCELLED:
             self.conversion_status_label.setText("已取消")
             if task.conversion_resumable:
-                self.conversion_detail_label.setText("已保留已完成进度，可继续转换")
+                self.conversion_detail_label.setText(
+                    f"已保留 {task.conversion_progress:.0f}% 进度，可继续转换"
+                )
             else:
                 self.conversion_detail_label.setText("未生成输出文件")
         elif task.status == TaskStatus.FAILED:
@@ -2214,6 +2218,9 @@ class MainWindow(QMainWindow):
         task = self.tasks.get(task_key) if task_key else None
         if task is None or task.status != TaskStatus.CANCELLED:
             return
+        had_parts = task.conversion_resumable
+        if had_parts and not self._confirm_discard_progress(task):
+            return
         self._discard_conversion_parts(task)
         task.conversion_error = None
         task.conversion_summary = None
@@ -2226,7 +2233,29 @@ class MainWindow(QMainWindow):
         task.status = TaskStatus.METADATA_READY
         self._update_task_item(task)
         self._apply_task_to_preview(task)
-        self._show_footer_message("已清除取消状态", timeout=4000)
+        self._show_footer_message(
+            "已清除取消状态和保留进度" if had_parts else "已清除取消状态",
+            timeout=4000,
+        )
+
+    def _confirm_discard_progress(self, task: MediaTask) -> bool:
+        """Warn before dropping the segments kept by a cancelled conversion."""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("删除取消状态")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(f"该任务保留了约 {task.conversion_progress:.0f}% 的转换进度。")
+        dialog.setInformativeText("删除后已保留的进度会被清除，下次转换需要从头开始。")
+        delete_button = dialog.addButton(
+            "删除进度",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_button = dialog.addButton(
+            "取消",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(cancel_button)
+        dialog.exec()
+        return dialog.clickedButton() is delete_button
 
     @staticmethod
     def _discard_conversion_parts(task: MediaTask) -> None:

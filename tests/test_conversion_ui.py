@@ -220,6 +220,7 @@ def test_clear_cancelled_state_removes_parts_and_resets_task(
     task.conversion_progress = 30.0
     task.conversion_error = "转换已取消"
     window._apply_task_to_preview(task)
+    window._confirm_discard_progress = lambda _task: True
 
     window._clear_cancelled_state()
 
@@ -232,6 +233,64 @@ def test_clear_cancelled_state_removes_parts_and_resets_task(
     assert task.conversion_error is None
     assert part_dir.exists() is False
     assert window.clear_state_button.isVisibleTo(window) is False
+
+
+def test_clear_cancelled_state_keeps_parts_when_user_declines(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    part_dir = tmp_path / "converted" / ".clip.abc.parts"
+    part_dir.mkdir(parents=True)
+    (part_dir / "part_00000.mp4").write_bytes(b"segment")
+    task.conversion_part_dir = part_dir
+    task.conversion_resumable = True
+    task.conversion_progress = 45.0
+    task.conversion_error = "转换已取消"
+    window._apply_task_to_preview(task)
+    window._confirm_discard_progress = lambda _task: False
+
+    window._clear_cancelled_state()
+
+    assert task.status == TaskStatus.CANCELLED
+    assert task.conversion_resumable is True
+    assert task.conversion_part_dir == part_dir
+    assert part_dir.is_dir()
+    assert window.clear_state_button.isVisibleTo(window)
+
+
+def test_cancelled_detail_shows_kept_progress(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    task.conversion_resumable = True
+    task.conversion_progress = 43.0
+
+    window._apply_task_to_preview(task)
+
+    assert "43%" in window.conversion_detail_label.text()
+
+
+def test_converting_row_shows_remaining_time_on_the_right(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    task.status = TaskStatus.CONVERTING
+    task.conversion_speed = "1.2x"
+    task.conversion_eta_seconds = 88.0
+    window._apply_task_to_preview(task)
+    window.show()
+    qtbot.waitExposed(window)
+
+    detail = window.conversion_detail_label
+    assert detail.width() > 0
+    assert "剩余 01:28" in detail.text()
+    assert detail.x() + detail.width() > window.conversion_progress_bar.width() / 2
 
 
 def test_cancelled_conversion_result_keeps_progress(
