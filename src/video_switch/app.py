@@ -1,11 +1,11 @@
 """Application entry point."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
 from video_switch.ui.fonts import create_application_font
-from video_switch.ui.main_window import APP_NAME, MainWindow
+from video_switch.ui.main_window import APP_ICON_PATH, APP_NAME, MainWindow
 
 
 def main() -> None:
@@ -19,6 +19,7 @@ def main() -> None:
     app.setFont(create_application_font())
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("VideoSwitch")
+    app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     app.setStyle("Fusion")
 
     window = MainWindow()

@@ -97,6 +97,7 @@ THEME_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / 
 SETTINGS_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "settings.svg"
 FOLDER_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "folder.svg"
 REFRESH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "refresh.svg"
+APP_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "app.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -608,6 +609,7 @@ class MainWindow(QMainWindow):
         self.toolchain_status: ToolchainStatus | None = None
 
         self.setWindowTitle(f"{APP_NAME} - 视频转换器")
+        self.setWindowIcon(QIcon(str(APP_ICON_PATH)))
         self.resize(1280, 800)
         self.setMinimumSize(1080, 680)
         self.setAcceptDrops(True)
