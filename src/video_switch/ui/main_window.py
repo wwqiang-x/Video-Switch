@@ -92,6 +92,8 @@ VIDEO_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / 
 TRASH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "trash.svg"
 THEME_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "theme.svg"
 SETTINGS_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "settings.svg"
+FOLDER_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "folder.svg"
+REFRESH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "refresh.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -884,13 +886,15 @@ class MainWindow(QMainWindow):
         output_row.setSpacing(8)
         self.output_path = QLineEdit("默认：源文件旁的 converted")
         self.output_path.setReadOnly(True)
-        self.browse_button = QToolButton()
-        self.browse_button.setObjectName("IconButton")
-        self.browse_button.setToolTip("选择输出目录")
+        self.browse_button = AssetIconButton(
+            "AssetIconButton",
+            "选择输出目录",
+        )
         self.browse_button.clicked.connect(self._choose_output_directory)
-        self.reset_output_button = QToolButton()
-        self.reset_output_button.setObjectName("IconButton")
-        self.reset_output_button.setToolTip("恢复默认输出目录")
+        self.reset_output_button = AssetIconButton(
+            "AssetIconButton",
+            "恢复默认输出目录",
+        )
         self.reset_output_button.clicked.connect(self._reset_output_directory)
         output_row.addWidget(self.output_path, 1)
         output_row.addWidget(self.browse_button)
@@ -1865,16 +1869,10 @@ class MainWindow(QMainWindow):
                 widget=self,
             )
         )
-        self.browse_button.setIcon(
-            _colored_icon(self, QStyle.StandardPixmap.SP_DirOpenIcon, palette.text)
-        )
-        self.reset_output_button.setIcon(
-            _colored_icon(
-                self,
-                QStyle.StandardPixmap.SP_BrowserReload,
-                palette.text,
-            )
-        )
+        self.browse_button.set_asset_icon(FOLDER_ICON_PATH, palette.text)
+        self.reset_output_button.set_asset_icon(REFRESH_ICON_PATH, palette.text)
+        self.browse_button.set_hover_color(palette.help_hover)
+        self.reset_output_button.set_hover_color(palette.help_hover)
         self.format_help_button.set_hover_color(palette.help_hover)
         if self.advanced_section.help_button is not None:
             self.advanced_section.help_button.set_hover_color(palette.help_hover)

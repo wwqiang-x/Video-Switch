@@ -9,7 +9,9 @@ from video_switch.services.media_probe import ProbeResult
 from video_switch.services.thumbnail import ThumbnailResult
 from video_switch.ui.main_window import (
     FILE_ICON_PATH,
+    FOLDER_ICON_PATH,
     PLAY_ICON_PATH,
+    REFRESH_ICON_PATH,
     SETTINGS_ICON_PATH,
     THEME_ICON_PATH,
     TRASH_ICON_PATH,
@@ -39,6 +41,8 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert TRASH_ICON_PATH.is_file()
     assert THEME_ICON_PATH.is_file()
     assert SETTINGS_ICON_PATH.is_file()
+    assert FOLDER_ICON_PATH.is_file()
+    assert REFRESH_ICON_PATH.is_file()
 
     window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
@@ -61,6 +65,8 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.clear_button.icon().isNull() is False
     assert window.theme_button.icon().isNull() is False
     assert window.settings_button.icon().isNull() is False
+    assert window.browse_button.icon().isNull() is False
+    assert window.reset_output_button.icon().isNull() is False
     assert window.format_buttons["MP4"].isChecked()
     assert window.task_stack.currentIndex() == 0
     assert window.start_button.isEnabled() is False
