@@ -316,6 +316,26 @@ QFrame#SourcePathRow {{
     border-radius: 6px;
 }}
 
+QFrame#ConversionProgress {{
+    background: {palette.surface_alt};
+    border: 1px solid {palette.border};
+    border-radius: 8px;
+}}
+
+QProgressBar {{
+    background: {palette.surface};
+    border: 1px solid {palette.border_strong};
+    border-radius: 5px;
+    color: {palette.text};
+    min-height: 18px;
+    text-align: center;
+}}
+
+QProgressBar::chunk {{
+    background: {palette.primary};
+    border-radius: 4px;
+}}
+
 QPushButton#PrimaryAction {{
     background: {palette.primary};
     border: 1px solid {palette.primary};

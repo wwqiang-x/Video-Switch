@@ -13,10 +13,13 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QUrl,
     Signal,
 )
 from PySide6.QtGui import (
+    QCloseEvent,
     QColor,
+    QDesktopServices,
     QDragEnterEvent,
     QDropEvent,
     QFontMetrics,
@@ -45,6 +48,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -64,6 +68,11 @@ from video_switch.models.conversion_settings import (
     ConversionSettings,
 )
 from video_switch.models.media_task import MediaTask, TaskStatus
+from video_switch.services.conversion_runner import (
+    ConversionProgress,
+    ConversionResult,
+    ConversionRunner,
+)
 from video_switch.services.ffmpeg_command import (
     QUALITY_DEFAULTS,
     build_command_preview,
@@ -603,6 +612,11 @@ class MainWindow(QMainWindow):
         )
         self.thumbnail_service.task_started.connect(self._on_task_thumbnail_started)
         self.thumbnail_service.task_finished.connect(self._on_task_thumbnail_finished)
+        self.conversion_runner = ConversionRunner(self)
+        self.conversion_runner.started.connect(self._on_conversion_started)
+        self.conversion_runner.progress.connect(self._on_conversion_progress)
+        self.conversion_runner.log_line.connect(self._on_conversion_log)
+        self.conversion_runner.finished.connect(self._on_conversion_finished)
         self.toolchain_detector = ToolchainDetector(self)
         self.toolchain_detector.started.connect(self._on_toolchain_detection_started)
         self.toolchain_detector.finished.connect(self._on_toolchain_detected)
@@ -898,10 +912,63 @@ class MainWindow(QMainWindow):
         source_layout.addWidget(source_label)
         source_layout.addWidget(self.source_path, 1)
 
+        self.conversion_progress_frame = QFrame()
+        self.conversion_progress_frame.setObjectName("ConversionProgress")
+        progress_layout = QVBoxLayout(self.conversion_progress_frame)
+        progress_layout.setContentsMargins(10, 9, 10, 9)
+        progress_layout.setSpacing(6)
+
+        progress_heading = QHBoxLayout()
+        self.conversion_status_label = QLabel("转换进度")
+        self.conversion_status_label.setObjectName("SectionLabel")
+        self.conversion_detail_label = QLabel("--")
+        self.conversion_detail_label.setProperty("muted", True)
+        progress_heading.addWidget(self.conversion_status_label)
+        progress_heading.addStretch(1)
+        progress_heading.addWidget(self.conversion_detail_label)
+
+        self.conversion_progress_bar = QProgressBar()
+        self.conversion_progress_bar.setRange(0, 100)
+        self.conversion_progress_bar.setValue(0)
+        self.conversion_progress_bar.setTextVisible(True)
+
+        result_actions = QHBoxLayout()
+        result_actions.setSpacing(8)
+        self.open_file_button = QPushButton("打开文件")
+        self.open_file_button.setObjectName("SecondaryAction")
+        self.open_file_button.clicked.connect(self._open_output_file)
+        self.open_folder_button = QPushButton("打开所在目录")
+        self.open_folder_button.setObjectName("SecondaryAction")
+        self.open_folder_button.clicked.connect(self._open_output_folder)
+        result_actions.addWidget(self.open_file_button)
+        result_actions.addWidget(self.open_folder_button)
+        result_actions.addStretch(1)
+
+        progress_layout.addLayout(progress_heading)
+        progress_layout.addWidget(self.conversion_progress_bar)
+        progress_layout.addLayout(result_actions)
+        self.conversion_progress_frame.hide()
+
+        self.conversion_log_section = CollapsibleSection("转换日志")
+        self.conversion_log = QPlainTextEdit()
+        self.conversion_log.setObjectName("CommandPreview")
+        self.conversion_log.setReadOnly(True)
+        self.conversion_log.setMaximumHeight(120)
+        self.conversion_log_section.content_layout.addWidget(
+            self.conversion_log,
+            0,
+            0,
+            1,
+            2,
+        )
+        self.conversion_log_section.hide()
+
         layout.addLayout(heading)
         layout.addWidget(self.preview_stage, 1)
         layout.addWidget(metrics)
         layout.addWidget(source_row)
+        layout.addWidget(self.conversion_progress_frame)
+        layout.addWidget(self.conversion_log_section)
         return panel
 
     def _build_settings_panel(self) -> QWidget:
@@ -1056,10 +1123,21 @@ class MainWindow(QMainWindow):
         self.start_button.setIcon(_icon(self, QStyle.StandardPixmap.SP_MediaPlay))
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("请先导入视频")
+        self.start_button.clicked.connect(self._start_conversion)
+
+        self.cancel_button = QPushButton("取消转换")
+        self.cancel_button.setObjectName("SecondaryAction")
+        self.cancel_button.hide()
+        self.cancel_button.clicked.connect(self._cancel_conversion)
+
+        bottom_actions = QHBoxLayout()
+        bottom_actions.setSpacing(8)
+        bottom_actions.addWidget(self.start_button, 2)
+        bottom_actions.addWidget(self.cancel_button, 1)
 
         panel_layout.addLayout(heading)
         panel_layout.addWidget(scroll, 1)
-        panel_layout.addWidget(self.start_button)
+        panel_layout.addLayout(bottom_actions)
         return panel
 
     @staticmethod
@@ -1398,7 +1476,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 6")
+        stage_label = QLabel("开发阶段 · 步骤 7")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
@@ -1586,8 +1664,21 @@ class MainWindow(QMainWindow):
             self.media_status.setText("信息已读取")
             self.preview_hint.setText("等待生成缩略图")
         elif task.status == TaskStatus.FAILED:
-            self.media_status.setText("读取失败")
-            self.preview_hint.setText(task.probe_error or "无法读取视频信息")
+            if task.probe_error:
+                self.media_status.setText("读取失败")
+                self.preview_hint.setText(task.probe_error)
+            else:
+                self.media_status.setText("转换失败")
+                self.preview_hint.setText(task.conversion_error or "视频转换失败")
+        elif task.status == TaskStatus.CONVERTING:
+            self.media_status.setText("转换中")
+            self.preview_hint.setText(f"转换进度 {task.conversion_progress:.0f}%")
+        elif task.status == TaskStatus.COMPLETED:
+            self.media_status.setText("已完成")
+            self.preview_hint.setText("视频转换完成")
+        elif task.status == TaskStatus.CANCELLED:
+            self.media_status.setText("已取消")
+            self.preview_hint.setText("转换已取消")
         else:
             self.media_status.setText("已导入")
             if self._available_ffprobe_path():
@@ -1599,8 +1690,7 @@ class MainWindow(QMainWindow):
         self.preview_hint.setToolTip(task.probe_error or task.thumbnail_error or "")
         self.regenerate_thumbnail_button.setVisible(info is not None)
         self.regenerate_thumbnail_button.setEnabled(info is not None)
-        self.start_button.setEnabled(False)
-        self.start_button.setToolTip("视频转换将在步骤 7 接入")
+        self._apply_conversion_to_preview(task)
 
     def _apply_thumbnail_to_preview(self, task: MediaTask) -> None:
         thumbnail_path = task.thumbnail_path
@@ -1643,8 +1733,10 @@ class MainWindow(QMainWindow):
         self.preview_icon.show()
         self.regenerate_thumbnail_button.hide()
         self.regenerate_thumbnail_button.setEnabled(False)
-        self.start_button.setEnabled(False)
-        self.start_button.setToolTip("请先导入视频")
+        self.conversion_progress_frame.hide()
+        self.conversion_log_section.hide()
+        self.conversion_log.clear()
+        self._update_conversion_controls()
 
     def _probe_pending_tasks(self) -> None:
         ffprobe_path = self._available_ffprobe_path()
@@ -1725,6 +1817,227 @@ class MainWindow(QMainWindow):
             return
         self._queue_thumbnail_for_task(task, force=True)
 
+    def _apply_conversion_to_preview(self, task: MediaTask) -> None:
+        has_conversion_state = task.status in {
+            TaskStatus.CONVERTING,
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }
+        if task.status == TaskStatus.FAILED and task.probe_error:
+            has_conversion_state = False
+        if has_conversion_state:
+            self.conversion_progress_frame.show()
+            self.conversion_progress_bar.setValue(round(task.conversion_progress))
+        else:
+            self.conversion_progress_frame.hide()
+
+        if task.status == TaskStatus.CONVERTING:
+            details: list[str] = []
+            if task.conversion_speed:
+                details.append(task.conversion_speed)
+            if task.conversion_eta_seconds is not None:
+                details.append(f"剩余 {self._format_duration(task.conversion_eta_seconds)}")
+            self.conversion_status_label.setText("正在转换")
+            self.conversion_detail_label.setText(" · ".join(details) or "准备中")
+        elif task.status == TaskStatus.COMPLETED:
+            self.conversion_progress_bar.setValue(100)
+            self.conversion_status_label.setText("转换完成")
+            output_text = task.output_path.name if task.output_path else "--"
+            if task.output_path and task.output_path.is_file():
+                output_text += f" · {format_file_size(task.output_path.stat().st_size)}"
+            self.conversion_detail_label.setText(output_text)
+        elif task.status == TaskStatus.CANCELLED:
+            self.conversion_status_label.setText("已取消")
+            self.conversion_detail_label.setText("未生成输出文件")
+        elif task.status == TaskStatus.FAILED:
+            self.conversion_status_label.setText("转换失败")
+            self.conversion_detail_label.setText(task.conversion_error or "未知错误")
+
+        has_output = (
+            task.status == TaskStatus.COMPLETED
+            and task.output_path is not None
+            and task.output_path.is_file()
+        )
+        self.open_file_button.setVisible(has_output)
+        self.open_folder_button.setVisible(has_output)
+
+        if task.conversion_log:
+            self.conversion_log_section.show()
+            self.conversion_log.setPlainText(task.conversion_log)
+            if task.status == TaskStatus.FAILED:
+                self.conversion_log_section.toggle.setChecked(True)
+        else:
+            self.conversion_log_section.hide()
+            self.conversion_log.clear()
+        self._update_conversion_controls()
+
+    def _update_conversion_controls(self) -> None:
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        running = self.conversion_runner.is_running
+        can_start = (
+            task is not None
+            and task.media_info is not None
+            and self._available_ffmpeg_path() is not None
+            and not running
+        )
+        self.start_button.setEnabled(can_start)
+        if task is not None and task.status in {
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+        }:
+            self.start_button.setText("重新转换")
+        else:
+            self.start_button.setText("开始转换")
+
+        if task is None:
+            self.start_button.setToolTip("请先导入视频")
+        elif task.media_info is None:
+            self.start_button.setToolTip("请等待媒体信息读取完成")
+        elif self._available_ffmpeg_path() is None:
+            self.start_button.setToolTip("FFmpeg 环境未就绪")
+        elif running:
+            self.start_button.setToolTip("当前已有转换任务正在执行")
+        else:
+            self.start_button.setToolTip("使用当前设置转换所选视频")
+
+        self.cancel_button.setVisible(running)
+        self.cancel_button.setEnabled(running)
+
+    def _start_conversion(self) -> None:
+        if self.conversion_runner.is_running:
+            return
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        ffmpeg_path = self._available_ffmpeg_path()
+        if task is None or task.media_info is None or ffmpeg_path is None:
+            self._update_conversion_controls()
+            return
+        if task.status == TaskStatus.CONVERTING:
+            return
+
+        try:
+            self.conversion_runner.start(
+                task,
+                self._current_conversion_settings(),
+                self.output_directory,
+                ffmpeg_path,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            task.status = TaskStatus.FAILED
+            task.conversion_error = str(error)
+            self._update_task_item(task)
+            self._apply_task_to_preview(task)
+            self._show_footer_message(
+                f"无法开始转换：{error}",
+                state="error",
+                timeout=6000,
+            )
+
+    def _cancel_conversion(self) -> None:
+        if not self.conversion_runner.is_running:
+            return
+        self.cancel_button.setEnabled(False)
+        self.conversion_status_label.setText("正在取消")
+        self.conversion_runner.cancel()
+
+    def _on_conversion_started(self, task_key: str, output_path: object) -> None:
+        task = self.tasks.get(task_key)
+        if task is None:
+            return
+        task.status = TaskStatus.CONVERTING
+        task.output_path = Path(output_path)
+        task.conversion_progress = 0.0
+        task.conversion_speed = None
+        task.conversion_eta_seconds = None
+        task.conversion_log = ""
+        task.conversion_error = None
+        self._update_task_item(task)
+        if self._current_task_key() == task_key:
+            self._apply_task_to_preview(task)
+        self._show_footer_message(
+            f"正在转换 {task.display_name}",
+            timeout=0,
+        )
+
+    def _on_conversion_progress(self, progress: ConversionProgress) -> None:
+        task = self.tasks.get(progress.task_key)
+        if task is None:
+            return
+        task.conversion_progress = progress.percent
+        task.conversion_speed = progress.speed
+        task.conversion_eta_seconds = progress.eta_seconds
+        self._update_task_item(task)
+        if self._current_task_key() == progress.task_key:
+            self._apply_conversion_to_preview(task)
+
+    def _on_conversion_log(self, task_key: str, text: str) -> None:
+        task = self.tasks.get(task_key)
+        if task is None:
+            return
+        task.conversion_log += text
+        if self._current_task_key() == task_key:
+            self.conversion_log_section.show()
+            self.conversion_log.setPlainText(task.conversion_log)
+            scroll_bar = self.conversion_log.verticalScrollBar()
+            scroll_bar.setValue(scroll_bar.maximum())
+
+    def _on_conversion_finished(self, result: ConversionResult) -> None:
+        task = self.tasks.get(result.task_key)
+        if task is None:
+            return
+        task.output_path = result.output_path
+        task.conversion_log = result.log
+        task.conversion_speed = None
+        task.conversion_eta_seconds = None
+        if result.cancelled:
+            task.status = TaskStatus.CANCELLED
+            task.conversion_error = "转换已取消"
+            footer_message = f"已取消转换 {task.display_name}"
+        elif result.success:
+            task.status = TaskStatus.COMPLETED
+            task.conversion_progress = 100.0
+            task.conversion_error = None
+            footer_message = f"转换完成：{result.output_path.name}"
+        else:
+            task.status = TaskStatus.FAILED
+            task.conversion_error = result.error or "转换失败"
+            footer_message = f"转换失败：{task.display_name}"
+
+        self._update_task_item(task)
+        if self._current_task_key() == task.key:
+            self._apply_task_to_preview(task)
+        else:
+            self._update_conversion_controls()
+        self._show_footer_message(
+            footer_message,
+            details=task.conversion_error or "",
+            state="error" if task.status == TaskStatus.FAILED else "ready",
+            timeout=6000,
+        )
+
+    def _open_output_file(self) -> None:
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        if task is None or task.output_path is None:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(task.output_path)))
+
+    def _open_output_folder(self) -> None:
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        if task is None or task.output_path is None:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(task.output_path.parent)))
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        total_seconds = max(0, round(seconds))
+        minutes, remaining_seconds = divmod(total_seconds, 60)
+        return f"{minutes:02d}:{remaining_seconds:02d}"
+
     def _on_task_probe_started(self, task_key: str) -> None:
         task = self.tasks.get(task_key)
         if task is None:
@@ -1759,13 +2072,20 @@ class MainWindow(QMainWindow):
         item = self.task_items.get(task.key)
         if item is None:
             return
+        status_text = task.status_text
+        if task.status == TaskStatus.CONVERTING:
+            status_text = f"转换中 {task.conversion_progress:.0f}%"
         item.setText(
             f"{task.display_name}\n"
-            f"{task.extension}  ·  {format_file_size(task.size_bytes)}  ·  {task.status_text}"
+            f"{task.extension}  ·  {format_file_size(task.size_bytes)}  ·  {status_text}"
         )
         tooltip = str(task.path)
         if task.probe_error:
             tooltip = f"{tooltip}\n{task.probe_error}"
+        if task.conversion_error:
+            tooltip = f"{tooltip}\n{task.conversion_error}"
+        if task.output_path:
+            tooltip = f"{tooltip}\n输出：{task.output_path}"
         item.setToolTip(tooltip)
 
     def _current_task_key(self) -> str | None:
@@ -1780,6 +2100,14 @@ class MainWindow(QMainWindow):
             return
         task_key = str(item.data(Qt.ItemDataRole.UserRole))
         task = self.tasks.pop(task_key, None)
+        if task is not None and task.status == TaskStatus.CONVERTING:
+            self.tasks[task_key] = task
+            self._show_footer_message(
+                "请先取消当前转换任务",
+                state="error",
+                timeout=4000,
+            )
+            return
         self.task_items.pop(task_key, None)
         self.probe_service.cancel_task(task_key)
         self.thumbnail_service.cancel_task(task_key)
@@ -1804,6 +2132,8 @@ class MainWindow(QMainWindow):
         dialog.exec()
         if dialog.clickedButton() is not clear_button:
             return
+        if self.conversion_runner.is_running:
+            self.conversion_runner.cancel()
         self.probe_service.cancel_all()
         self.thumbnail_service.cancel_all()
         for task in self.tasks.values():
@@ -1824,6 +2154,7 @@ class MainWindow(QMainWindow):
         self.remove_button.setEnabled(has_selection)
         self.clear_queue_button.setEnabled(has_tasks)
         self._update_output_preview()
+        self._update_conversion_controls()
 
     def _show_footer_message(
         self,
@@ -1909,6 +2240,7 @@ class MainWindow(QMainWindow):
         self.footer_status_label.setToolTip("\n".join(details))
         self._probe_pending_tasks()
         self._queue_thumbnails_for_ready_tasks()
+        self._update_conversion_controls()
 
     def _set_status_state(self, state: str) -> None:
         self.status_dot.setProperty("state", state)
@@ -1928,6 +2260,25 @@ class MainWindow(QMainWindow):
             event.ignore()
             return True
         return super().eventFilter(watched, event)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.conversion_runner.is_running:
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("转换正在进行")
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setText("当前仍有视频正在转换，是否取消并退出？")
+            exit_button = dialog.addButton(
+                "取消并退出",
+                QMessageBox.ButtonRole.DestructiveRole,
+            )
+            dialog.addButton("继续转换", QMessageBox.ButtonRole.RejectRole)
+            dialog.exec()
+            if dialog.clickedButton() is not exit_button:
+                event.ignore()
+                return
+            self.conversion_runner.shutdown()
+        event.accept()
+        super().closeEvent(event)
 
     def _show_format_help(self) -> None:
         if self.format_help_dialog is None:

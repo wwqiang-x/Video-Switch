@@ -53,10 +53,13 @@ def build_ffmpeg_args(
     settings: ConversionSettings,
     input_path: Path | None,
     output_path: Path,
+    report_progress: bool = False,
 ) -> list[str]:
     """Build ffmpeg arguments without executing a conversion."""
     args = [
         "-hide_banner",
+        "-loglevel",
+        "warning",
         "-y",
         "-i",
         str(input_path) if input_path is not None else "<输入文件>",
@@ -111,6 +114,8 @@ def build_ffmpeg_args(
         if settings.output_format == "MP4":
             args.extend(["-movflags", "+faststart"])
 
+    if report_progress:
+        args.extend(["-progress", "pipe:1", "-nostats"])
     args.append(str(output_path))
     return args
 

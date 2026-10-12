@@ -18,6 +18,20 @@ def test_default_mp4_command() -> None:
     assert "+faststart" in args
 
 
+def test_progress_command_options() -> None:
+    args = build_ffmpeg_args(
+        ConversionSettings(),
+        Path("input.mp4"),
+        Path("output.mp4"),
+        report_progress=True,
+    )
+
+    assert "-progress" in args
+    assert "pipe:1" in args
+    assert "-nostats" in args
+    assert args[-1] == "output.mp4"
+
+
 def test_audio_only_command() -> None:
     settings = ConversionSettings(
         output_format="MP3",

@@ -1,5 +1,10 @@
 """Application service layer."""
 
+from video_switch.services.conversion_runner import (
+    ConversionProgress,
+    ConversionResult,
+    ConversionRunner,
+)
 from video_switch.services.ffmpeg_command import (
     build_command_preview,
     build_ffmpeg_args,
@@ -20,6 +25,9 @@ from video_switch.services.video_importer import ImportResult, VideoImporter
 
 __all__ = [
     "ImportResult",
+    "ConversionProgress",
+    "ConversionResult",
+    "ConversionRunner",
     "MediaProbeService",
     "ProbeResult",
     "ThumbnailResult",

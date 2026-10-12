@@ -63,6 +63,17 @@ ffmpeg -y -i input.mp4 -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k -m
 
 WebM、MP3、WAV 和 GIF 会使用各自对应的编码参数和输出扩展名。
 
+## 转换进度
+
+实际执行转换时，应用会追加以下参数：
+
+```powershell
+-progress pipe:1 -nostats
+```
+
+FFmpeg 会把 `out_time_us`、`speed` 和 `progress` 等键值持续写入标准输出。
+应用根据媒体时长换算百分比和剩余时间；取消时终止对应进程并清理未完成文件。
+
 ## 面试需要掌握的概念
 
 - MP4、MKV、WebM 是容器格式。
