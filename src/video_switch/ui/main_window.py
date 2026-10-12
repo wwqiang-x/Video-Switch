@@ -123,6 +123,7 @@ REFRESH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" 
 APP_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "app.svg"
 RUN_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "run.svg"
 DELETE_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "delete.svg"
+WARNING_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "warning.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -132,6 +133,7 @@ RESOLUTION_OPTIONS = ("保持原始", "1080p", "720p", "480p")
 FRAME_RATE_OPTIONS = ("保持原始", "30 FPS", "24 FPS", "60 FPS")
 AUDIO_BITRATE_OPTIONS = ("128 kbps", "192 kbps", "256 kbps", "320 kbps")
 NOT_APPLICABLE = "不适用"
+MESSAGE_ICON_SIZE = 44
 
 
 def _progress_percent(value: float) -> int:
@@ -139,6 +141,17 @@ def _progress_percent(value: float) -> int:
     if value != value:  # NaN
         return 0
     return round(min(100.0, max(0.0, value)))
+
+
+def _center_message_text(dialog: QMessageBox, icon_size: int = MESSAGE_ICON_SIZE) -> None:
+    """Vertically centre a message box text next to its icon."""
+    label = dialog.findChild(QLabel, "qt_msgbox_label")
+    if label is None:
+        return
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    # The message label has no height of its own, so give it the icon's height;
+    # otherwise Qt top-aligns it inside the row and the dialog looks unbalanced.
+    label.setMinimumHeight(icon_size)
 
 
 def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap) -> QIcon:
@@ -1809,14 +1822,28 @@ class MainWindow(QMainWindow):
             [str(task.path) for task in self.tasks.values()],
         )
 
-    def _show_import_issues(self, result: ImportResult) -> None:
+    def _warning_dialog(self, title: str, text: str) -> QMessageBox:
+        """Build a themed warning dialog with the bundled warning icon."""
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("文件未导入")
-        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(title)
+        dialog.setIconPixmap(
+            _tinted_svg_pixmap(
+                WARNING_ICON_PATH,
+                get_palette(self.theme_name).warning,
+                MESSAGE_ICON_SIZE,
+                widget=self,
+            )
+        )
+        dialog.setText(text)
+        _center_message_text(dialog)
+        return dialog
+
+    def _show_import_issues(self, result: ImportResult) -> None:
         if result.added:
-            dialog.setText(f"已导入 {len(result.added)} 个视频，但部分文件不支持或无法访问。")
+            text = f"已导入 {len(result.added)} 个视频，但部分文件不支持或无法访问。"
         else:
-            dialog.setText("拖入的文件中没有可导入的视频。")
+            text = "拖入的文件中没有可导入的视频。"
+        dialog = self._warning_dialog("文件未导入", text)
         dialog.setInformativeText("仅支持常见视频文件，例如 MP4、MKV、MOV、AVI、WebM。")
         dialog.setDetailedText(
             "\n".join(f"{issue.path.name or issue.path}：{issue.reason}" for issue in result.issues)
@@ -2531,10 +2558,10 @@ class MainWindow(QMainWindow):
 
     def _confirm_discard_progress(self, task: MediaTask) -> bool:
         """Warn before dropping the segments kept by a cancelled conversion."""
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("删除取消状态")
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(f"该任务保留了约 {task.conversion_progress:.0f}% 的转换进度。")
+        dialog = self._warning_dialog(
+            "删除取消状态",
+            f"该任务保留了约 {task.conversion_progress:.0f}% 的转换进度。",
+        )
         dialog.setInformativeText("删除后已保留的进度会被清除，下次转换需要从头开始。")
         delete_button = dialog.addButton(
             "删除进度",
@@ -2804,10 +2831,10 @@ class MainWindow(QMainWindow):
         record = self._selected_history_record()
         if record is None:
             return
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("删除历史记录")
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(f"确定删除这条 {record.output_format} 转换历史吗？")
+        dialog = self._warning_dialog(
+            "删除历史记录",
+            f"确定删除这条 {record.output_format} 转换历史吗？",
+        )
         delete_button = dialog.addButton(
             "删除",
             QMessageBox.ButtonRole.DestructiveRole,
@@ -2839,10 +2866,10 @@ class MainWindow(QMainWindow):
         records = self._history_records_for_source(task.content_signature)
         if not records:
             return
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("清空转换历史")
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(f"确定清空“{task.display_name}”的 {len(records)} 条转换历史吗？")
+        dialog = self._warning_dialog(
+            "清空转换历史",
+            f"确定清空“{task.display_name}”的 {len(records)} 条转换历史吗？",
+        )
         clear_button = dialog.addButton(
             "清空该视频历史",
             QMessageBox.ButtonRole.AcceptRole,
@@ -2981,10 +3008,10 @@ class MainWindow(QMainWindow):
             if history_action == "cancel":
                 return
         else:
-            dialog = QMessageBox(self)
-            dialog.setWindowTitle("清空任务")
-            dialog.setIcon(QMessageBox.Icon.Warning)
-            dialog.setText(f"确定要移除队列中的 {len(self.tasks)} 个任务吗？")
+            dialog = self._warning_dialog(
+                "清空任务",
+                f"确定要移除队列中的 {len(self.tasks)} 个任务吗？",
+            )
             clear_button = dialog.addButton(
                 "清空",
                 QMessageBox.ButtonRole.AcceptRole,
@@ -3023,10 +3050,10 @@ class MainWindow(QMainWindow):
         return [record for record in self.history_records if record.source_key == source_key]
 
     def _ask_history_delete(self, count: int, subject: str) -> str:
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("删除转换历史")
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(f"{subject}有 {count} 条转换历史记录。删除任务时是否同时删除这些历史记录？")
+        dialog = self._warning_dialog(
+            "删除转换历史",
+            f"{subject}有 {count} 条转换历史记录。删除任务时是否同时删除这些历史记录？",
+        )
         history_button = dialog.addButton(
             "删除任务和历史",
             QMessageBox.ButtonRole.DestructiveRole,
@@ -3166,10 +3193,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.conversion_runner.is_running:
-            dialog = QMessageBox(self)
-            dialog.setWindowTitle("转换正在进行")
-            dialog.setIcon(QMessageBox.Icon.Warning)
-            dialog.setText("当前仍有视频正在转换，是否取消并退出？")
+            dialog = self._warning_dialog(
+                "转换正在进行",
+                "当前仍有视频正在转换，是否取消并退出？",
+            )
             exit_button = dialog.addButton(
                 "取消并退出",
                 QMessageBox.ButtonRole.DestructiveRole,
