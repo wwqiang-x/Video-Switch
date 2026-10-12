@@ -1,12 +1,13 @@
 """Smoke tests for the desktop entry point and main interface shell."""
 
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
-from PySide6.QtGui import QDropEvent, QPixmap
+from PySide6.QtGui import QDropEvent, QFont, QPixmap
 
 from video_switch import main
 from video_switch.models.media_info import MediaInfo
 from video_switch.services.media_probe import ProbeResult
 from video_switch.services.thumbnail import ThumbnailResult
+from video_switch.ui.fonts import create_application_font
 from video_switch.ui.main_window import (
     FILE_ICON_PATH,
     FOLDER_ICON_PATH,
@@ -97,6 +98,14 @@ def test_svg_rendering_uses_device_pixel_ratio() -> None:
     assert pixmap.width() == 48
     assert pixmap.height() == 48
     assert pixmap.devicePixelRatio() == 2.0
+
+
+def test_application_font_uses_full_hinting() -> None:
+    font = create_application_font()
+
+    assert font.family() == "Microsoft YaHei UI"
+    assert font.pixelSize() == 13
+    assert font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
 
 
 def test_importing_video_updates_queue_and_preview(

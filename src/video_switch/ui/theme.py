@@ -160,7 +160,7 @@ QLabel#BrandMark {{
     border-radius: 8px;
     color: #ffffff;
     font-size: 15px;
-    font-weight: 800;
+    font-weight: 700;
 }}
 
 QLabel#BrandTitle {{
@@ -195,7 +195,7 @@ QLabel#SectionLabel {{
 QLabel#MetricValue {{
     color: {palette.text};
     font-size: 15px;
-    font-weight: 650;
+    font-weight: 600;
 }}
 
 QLabel#StatusChip,
@@ -204,7 +204,7 @@ QLabel#CountBadge {{
     border-radius: 10px;
     color: {palette.primary};
     font-size: 12px;
-    font-weight: 650;
+    font-weight: 600;
     padding: 3px 9px;
 }}
 
@@ -233,7 +233,7 @@ QLabel#QueueCount {{
     border-radius: 10px;
     color: {palette.muted};
     font-size: 12px;
-    font-weight: 650;
+    font-weight: 600;
     padding: 2px 8px;
 }}
 
@@ -288,7 +288,7 @@ QLabel#StageIcon {{
 QLabel#PreviewTitle {{
     color: {palette.preview_text};
     font-size: 17px;
-    font-weight: 650;
+    font-weight: 600;
 }}
 
 QLabel#PreviewHint {{
@@ -321,7 +321,7 @@ QPushButton#PrimaryAction {{
     border: 1px solid {palette.primary};
     border-radius: 7px;
     color: #ffffff;
-    font-weight: 650;
+    font-weight: 600;
     min-height: 38px;
     padding: 0 16px;
 }}
@@ -390,7 +390,7 @@ QToolButton#SectionToggle {{
 QLabel#SectionTitle {{
     color: {palette.text};
     font-size: 13px;
-    font-weight: 650;
+    font-weight: 600;
 }}
 
 QToolButton[formatPreset="true"] {{

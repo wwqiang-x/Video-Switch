@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
+from video_switch.ui.fonts import create_application_font
 from video_switch.ui.main_window import APP_NAME, MainWindow
 
 
@@ -15,6 +16,7 @@ def main() -> None:
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
         )
         app = QApplication([])
+    app.setFont(create_application_font())
     app.setApplicationName(APP_NAME)
     app.setOrganizationName("VideoSwitch")
     app.setStyle("Fusion")

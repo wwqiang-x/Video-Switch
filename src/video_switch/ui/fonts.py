@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase
 
 _registered_font_families: tuple[str, ...] | None = None
 
@@ -30,3 +30,15 @@ def register_cjk_fonts() -> tuple[str, ...]:
 
     _registered_font_families = tuple(dict.fromkeys(registered))
     return _registered_font_families
+
+
+def create_application_font() -> QFont:
+    """Create a crisp UI font using the registered CJK family."""
+    register_cjk_fonts()
+    font = QFont("Microsoft YaHei UI")
+    font.setPixelSize(13)
+    font.setWeight(QFont.Weight.Normal)
+    font.setKerning(True)
+    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    return font
