@@ -114,6 +114,7 @@ SETTINGS_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons"
 FOLDER_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "folder.svg"
 REFRESH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "refresh.svg"
 APP_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "app.svg"
+RUN_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "run.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -442,6 +443,90 @@ class AddVideoButton(QPushButton):
         painter.drawText(
             QRect(text_x, 0, text_width + 2, self.height()),
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            self._label,
+        )
+        painter.end()
+
+
+class SvgActionButton(QPushButton):
+    """Primary action button with a centered SVG icon and vertically aligned text."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self._label = text
+        self._icon_pixmap = QPixmap()
+        self.setMinimumHeight(38)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAccessibleName(text)
+
+    def text(self) -> str:
+        return self._label
+
+    def setText(self, text: str) -> None:
+        self._label = text
+        self.setAccessibleName(text)
+        self.update()
+
+    def set_asset_icon(self, path: Path, color: str) -> None:
+        icon_size = self.fontMetrics().height()
+        self._icon_pixmap = _tinted_svg_pixmap(
+            path,
+            color,
+            icon_size,
+            widget=self,
+        )
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        del event
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.style().drawControl(
+            QStyle.ControlElement.CE_PushButton,
+            option,
+            painter,
+            self,
+        )
+
+        metrics = self.fontMetrics()
+        text_width = metrics.horizontalAdvance(self._label)
+        icon_size = (
+            self._icon_pixmap.deviceIndependentSize().toSize()
+            if not self._icon_pixmap.isNull()
+            else QSize()
+        )
+        gap = 7
+        group_width = icon_size.width() + gap + text_width
+        group_left = (self.width() - group_width) // 2
+        icon_y = (self.height() - icon_size.height()) // 2
+
+        if not self._icon_pixmap.isNull():
+            painter.drawPixmap(
+                QRectF(
+                    group_left,
+                    icon_y,
+                    icon_size.width(),
+                    icon_size.height(),
+                ),
+                self._icon_pixmap,
+                QRectF(
+                    0,
+                    0,
+                    self._icon_pixmap.width(),
+                    self._icon_pixmap.height(),
+                ),
+            )
+
+        text_color = QColor("#ffffff") if self.isEnabled() else QColor("#94a3b8")
+        painter.setPen(text_color)
+        baseline = (self.height() - metrics.height()) // 2 + metrics.ascent()
+        painter.drawText(
+            group_left + icon_size.width() + gap,
+            baseline,
             self._label,
         )
         painter.end()
@@ -1211,9 +1296,8 @@ class MainWindow(QMainWindow):
         content_layout.addStretch(1)
         scroll.setWidget(content)
 
-        self.start_button = QPushButton("开始转换")
+        self.start_button = SvgActionButton("开始转换")
         self.start_button.setObjectName("PrimaryAction")
-        self.start_button.setIcon(_icon(self, QStyle.StandardPixmap.SP_MediaPlay))
         self.start_button.setEnabled(False)
         self.start_button.setToolTip("请先导入视频")
         self.start_button.clicked.connect(self._start_conversion)
@@ -2692,9 +2776,7 @@ class MainWindow(QMainWindow):
         self.format_help_button.set_hover_color(palette.help_hover)
         if self.advanced_section.help_button is not None:
             self.advanced_section.help_button.set_hover_color(palette.help_hover)
-        self.start_button.setIcon(
-            _colored_icon(self, QStyle.StandardPixmap.SP_MediaPlay, palette.text)
-        )
+        self.start_button.set_asset_icon(RUN_ICON_PATH, "#ffffff")
         self.regenerate_thumbnail_button.set_asset_icon(
             REFRESH_ICON_PATH,
             palette.text,

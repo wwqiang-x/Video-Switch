@@ -19,6 +19,7 @@ from video_switch.ui.main_window import (
     FOLDER_ICON_PATH,
     PLAY_ICON_PATH,
     REFRESH_ICON_PATH,
+    RUN_ICON_PATH,
     SETTINGS_ICON_PATH,
     THEME_ICON_PATH,
     TRASH_ICON_PATH,
@@ -52,6 +53,7 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert FOLDER_ICON_PATH.is_file()
     assert REFRESH_ICON_PATH.is_file()
     assert APP_ICON_PATH.is_file()
+    assert RUN_ICON_PATH.is_file()
 
     window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
@@ -81,6 +83,9 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.format_buttons["MP4"].isChecked()
     assert window.task_stack.currentIndex() == 0
     assert window.start_button.isEnabled() is False
+    assert window.start_button._icon_pixmap.isNull() is False
+    start_icon_size = window.start_button._icon_pixmap.deviceIndependentSize()
+    assert round(start_icon_size.height()) == window.start_button.fontMetrics().height()
     assert window.regenerate_thumbnail_button.isHidden() is True
     assert window.regenerate_thumbnail_button.width() == 34
     assert window.regenerate_thumbnail_button.icon().isNull() is False
