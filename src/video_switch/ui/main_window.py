@@ -71,6 +71,7 @@ from video_switch.ui.settings_dialog import SettingsDialog
 from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 
 APP_NAME = "Video Switch"
+QUESTION_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "question.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -85,6 +86,11 @@ NOT_APPLICABLE = "不适用"
 def _icon(widget: QWidget, pixmap: QStyle.StandardPixmap) -> QIcon:
     """Return a platform-standard icon matching the current Qt style."""
     return widget.style().standardIcon(pixmap)
+
+
+def _question_icon() -> QIcon:
+    """Return the bundled vector question icon."""
+    return QIcon(str(QUESTION_ICON_PATH))
 
 
 def _colored_icon(
@@ -222,9 +228,10 @@ class CollapsibleSection(QWidget):
         if help_tooltip:
             self.help_button = QToolButton()
             self.help_button.setObjectName("InfoIconButton")
-            self.help_button.setText("i")
             self.help_button.setToolTip(help_tooltip)
-            self.help_button.setFixedSize(20, 20)
+            self.help_button.setFixedSize(22, 22)
+            self.help_button.setIconSize(QSize(18, 18))
+            self.help_button.setIcon(_question_icon())
             self.help_button.clicked.connect(self.help_requested.emit)
             header_layout.addWidget(self.help_button)
         header_layout.addStretch(1)
@@ -591,9 +598,10 @@ class MainWindow(QMainWindow):
         format_label.setObjectName("SectionLabel")
         self.format_help_button = QToolButton()
         self.format_help_button.setObjectName("HelpIconButton")
-        self.format_help_button.setText("?")
         self.format_help_button.setToolTip("查看输出格式说明")
-        self.format_help_button.setFixedSize(22, 22)
+        self.format_help_button.setFixedSize(24, 24)
+        self.format_help_button.setIconSize(QSize(20, 20))
+        self.format_help_button.setIcon(_question_icon())
         self.format_help_button.clicked.connect(self._show_format_help)
         format_header = QHBoxLayout()
         format_header.setContentsMargins(0, 0, 0, 0)

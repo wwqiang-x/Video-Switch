@@ -236,18 +236,16 @@ QLabel#QueueCount {{
 
 QToolButton#HelpIconButton,
 QToolButton#InfoIconButton {{
-    background: #111827;
-    border: 1px solid {palette.border_strong};
-    border-radius: 11px;
-    color: #ffffff;
-    font-size: 13px;
-    font-weight: 800;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
     padding: 0;
 }}
 
 QToolButton#HelpIconButton:hover,
 QToolButton#InfoIconButton:hover {{
-    background: #374151;
+    background: {palette.surface_hover};
+    border-color: {palette.border};
 }}
 
 QFrame#FormatCard {{
