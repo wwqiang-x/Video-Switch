@@ -74,6 +74,7 @@ from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 APP_NAME = "Video Switch"
 QUESTION_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "question.svg"
 PLAY_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "play.svg"
+FILE_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "file.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -495,6 +496,7 @@ class MainWindow(QMainWindow):
 
         self.empty_queue_icon = QLabel()
         self.empty_queue_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_queue_icon.setFixedSize(56, 56)
 
         title = QLabel("队列为空")
         title.setObjectName("PanelTitle")
@@ -505,7 +507,11 @@ class MainWindow(QMainWindow):
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setWordWrap(True)
 
-        layout.addWidget(self.empty_queue_icon)
+        layout.addWidget(
+            self.empty_queue_icon,
+            0,
+            Qt.AlignmentFlag.AlignHCenter,
+        )
         layout.addWidget(title)
         layout.addWidget(hint)
         return widget
@@ -1677,12 +1683,11 @@ class MainWindow(QMainWindow):
             )
         )
         self.empty_queue_icon.setPixmap(
-            _colored_icon(
-                self,
-                QStyle.StandardPixmap.SP_FileIcon,
+            _tinted_svg_pixmap(
+                FILE_ICON_PATH,
                 palette.muted,
-                42,
-            ).pixmap(42, 42)
+                48,
+            )
         )
         self.preview_icon.setPixmap(
             _tinted_svg_pixmap(

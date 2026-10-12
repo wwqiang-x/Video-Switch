@@ -7,7 +7,7 @@ from video_switch import main
 from video_switch.models.media_info import MediaInfo
 from video_switch.services.media_probe import ProbeResult
 from video_switch.services.thumbnail import ThumbnailResult
-from video_switch.ui.main_window import PLAY_ICON_PATH, MainWindow
+from video_switch.ui.main_window import FILE_ICON_PATH, PLAY_ICON_PATH, MainWindow
 
 
 def test_main_is_callable() -> None:
@@ -25,6 +25,7 @@ def test_main_window_can_be_created(qtbot, isolated_settings) -> None:
 
 def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert PLAY_ICON_PATH.is_file()
+    assert FILE_ICON_PATH.is_file()
 
     window = MainWindow(settings=isolated_settings)
     qtbot.addWidget(window)
@@ -36,9 +37,14 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.regenerate_thumbnail_button.isHidden() is True
     assert window.preview_icon.pixmap().isNull() is False
     assert window.preview_icon.pixmap().width() == 64
+    assert window.empty_queue_icon.pixmap().isNull() is False
+    assert window.empty_queue_icon.pixmap().width() == 48
     preview_layout = window.preview_icon.parentWidget().layout()
     icon_item = preview_layout.itemAt(preview_layout.indexOf(window.preview_icon))
     assert icon_item.alignment() & Qt.AlignmentFlag.AlignHCenter
+    queue_layout = window.empty_queue_icon.parentWidget().layout()
+    queue_icon_item = queue_layout.itemAt(queue_layout.indexOf(window.empty_queue_icon))
+    assert queue_icon_item.alignment() & Qt.AlignmentFlag.AlignHCenter
     assert window.media_status.text() == "未选择"
 
 
