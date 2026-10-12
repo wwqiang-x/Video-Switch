@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -110,6 +110,37 @@ def _colored_icon(
     painter.fillRect(tinted.rect(), QColor(color))
     painter.end()
     return QIcon(tinted)
+
+
+class HelpIconButton(QToolButton):
+    """Small SVG help button with a precisely positioned hover circle."""
+
+    def __init__(self, tooltip: str, object_name: str) -> None:
+        super().__init__()
+        self.setObjectName(object_name)
+        self.setToolTip(tooltip)
+        self.setFixedSize(22, 22)
+        self.setIconSize(QSize(15, 15))
+        self.setIcon(_question_icon())
+        self._hover_color = QColor("#e2e8f0")
+        self._hover_offset = QPointF(1.0, 1.0)
+        self._hover_diameter = 20.0
+
+    def set_hover_color(self, color: str) -> None:
+        self._hover_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        if self.underMouse():
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._hover_color)
+            left = (self.width() - self._hover_diameter) / 2 + self._hover_offset.x()
+            top = (self.height() - self._hover_diameter) / 2 + self._hover_offset.y()
+            painter.drawEllipse(QRectF(left, top, self._hover_diameter, self._hover_diameter))
+            painter.end()
+        super().paintEvent(event)
 
 
 def _panel() -> tuple[QFrame, QVBoxLayout]:
@@ -228,12 +259,10 @@ class CollapsibleSection(QWidget):
 
         self.help_button: QToolButton | None = None
         if help_tooltip:
-            self.help_button = QToolButton()
-            self.help_button.setObjectName("InfoIconButton")
-            self.help_button.setToolTip(help_tooltip)
-            self.help_button.setFixedSize(20, 20)
-            self.help_button.setIconSize(QSize(15, 15))
-            self.help_button.setIcon(_question_icon())
+            self.help_button = HelpIconButton(
+                help_tooltip,
+                "InfoIconButton",
+            )
             self.help_button.clicked.connect(self.help_requested.emit)
             header_layout.addWidget(self.help_button)
         header_layout.addStretch(1)
@@ -598,12 +627,10 @@ class MainWindow(QMainWindow):
 
         format_label = QLabel("目标格式")
         format_label.setObjectName("SectionLabel")
-        self.format_help_button = QToolButton()
-        self.format_help_button.setObjectName("HelpIconButton")
-        self.format_help_button.setToolTip("查看输出格式说明")
-        self.format_help_button.setFixedSize(20, 20)
-        self.format_help_button.setIconSize(QSize(15, 15))
-        self.format_help_button.setIcon(_question_icon())
+        self.format_help_button = HelpIconButton(
+            "查看输出格式说明",
+            "HelpIconButton",
+        )
         self.format_help_button.clicked.connect(self._show_format_help)
         format_header = QHBoxLayout()
         format_header.setContentsMargins(0, 0, 0, 0)
@@ -1654,6 +1681,9 @@ class MainWindow(QMainWindow):
                 palette.text,
             )
         )
+        self.format_help_button.set_hover_color(palette.help_hover)
+        if self.advanced_section.help_button is not None:
+            self.advanced_section.help_button.set_hover_color(palette.help_hover)
         self.start_button.setIcon(
             _colored_icon(self, QStyle.StandardPixmap.SP_MediaPlay, palette.text)
         )
