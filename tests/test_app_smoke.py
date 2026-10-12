@@ -4,7 +4,7 @@ import time
 
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDropEvent, QFont, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from video_switch import main
 from video_switch.models.media_info import MediaInfo
@@ -161,6 +161,34 @@ def test_mouse_wheel_does_not_change_settings(
 
     assert handled is True
     assert window.quality_combo.currentIndex() == original_index
+
+
+def test_unsupported_import_shows_warning_dialog(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+    monkeypatch,
+) -> None:
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not a video", encoding="utf-8")
+    window = MainWindow(settings=isolated_settings)
+    qtbot.addWidget(window)
+    captured: dict[str, str] = {}
+
+    def fake_exec(dialog: QMessageBox) -> int:
+        captured["title"] = dialog.windowTitle()
+        captured["text"] = dialog.text()
+        captured["details"] = dialog.detailedText()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+
+    window._import_paths([str(unsupported)], show_issue_dialog=True)
+
+    assert captured["title"] == "文件未导入"
+    assert "没有可导入的视频" in captured["text"]
+    assert "notes.txt" in captured["details"]
+    assert "不支持该文件格式" in captured["details"]
 
 
 def test_importing_video_updates_queue_and_preview(

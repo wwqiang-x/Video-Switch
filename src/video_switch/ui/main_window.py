@@ -1418,13 +1418,14 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         self.settings.setValue("files/last_import_directory", str(Path(paths[0]).parent))
-        self._import_paths(paths)
+        self._import_paths(paths, show_issue_dialog=True)
 
     def _import_paths(
         self,
         paths: list[str],
         show_feedback: bool = True,
         persist: bool = True,
+        show_issue_dialog: bool = False,
     ) -> None:
         result = self.importer.import_paths(
             paths,
@@ -1453,6 +1454,8 @@ class MainWindow(QMainWindow):
                 state=state,
                 timeout=6000,
             )
+        if show_issue_dialog and result.issues:
+            self._show_import_issues(result)
 
     def _restore_saved_tasks(self) -> None:
         saved_paths = self.settings.value("tasks/paths", [])
@@ -1472,6 +1475,21 @@ class MainWindow(QMainWindow):
             "tasks/paths",
             [str(task.path) for task in self.tasks.values()],
         )
+
+    def _show_import_issues(self, result: ImportResult) -> None:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("文件未导入")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        if result.added:
+            dialog.setText(f"已导入 {len(result.added)} 个视频，但部分文件不支持或无法访问。")
+        else:
+            dialog.setText("拖入的文件中没有可导入的视频。")
+        dialog.setInformativeText("仅支持常见视频文件，例如 MP4、MKV、MOV、AVI、WebM。")
+        dialog.setDetailedText(
+            "\n".join(f"{issue.path.name or issue.path}：{issue.reason}" for issue in result.issues)
+        )
+        dialog.addButton("知道了", QMessageBox.ButtonRole.AcceptRole)
+        dialog.exec()
 
     def _create_task_item(self, task: MediaTask) -> QListWidgetItem:
         item = QListWidgetItem(
@@ -1843,7 +1861,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         event.acceptProposedAction()
-        self._import_paths(paths)
+        self._import_paths(paths, show_issue_dialog=True)
 
     @staticmethod
     def _drop_paths(mime_data) -> list[str]:
