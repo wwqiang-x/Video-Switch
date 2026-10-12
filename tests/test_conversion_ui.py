@@ -245,6 +245,7 @@ def test_clear_cancelled_state_keeps_parts_when_user_declines(
     part_dir.mkdir(parents=True)
     (part_dir / "part_00000.mp4").write_bytes(b"segment")
     task.conversion_part_dir = part_dir
+    task.conversion_parts_completed = 1
     task.conversion_resumable = True
     task.conversion_progress = 45.0
     task.conversion_error = "转换已取消"
@@ -260,6 +261,28 @@ def test_clear_cancelled_state_keeps_parts_when_user_declines(
     assert window.clear_state_button.isVisibleTo(window)
 
 
+def test_clear_cancelled_state_skips_confirmation_without_segments(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    task.conversion_resumable = True
+    task.conversion_parts_completed = 0
+    task.conversion_progress = 0.0
+    window._apply_task_to_preview(task)
+
+    def fail(_task) -> bool:
+        raise AssertionError("confirmation should not be asked")
+
+    window._confirm_discard_progress = fail
+
+    window._clear_cancelled_state()
+
+    assert task.status == TaskStatus.METADATA_READY
+    assert task.conversion_resumable is False
+
+
 def test_cancelled_detail_shows_kept_progress(
     qtbot,
     tmp_path,
@@ -267,11 +290,44 @@ def test_cancelled_detail_shows_kept_progress(
 ) -> None:
     window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
     task.conversion_resumable = True
+    task.conversion_parts_completed = 1
     task.conversion_progress = 43.0
 
     window._apply_task_to_preview(task)
 
     assert "43%" in window.conversion_detail_label.text()
+
+
+def test_cancelled_detail_without_finished_segments(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    task.conversion_resumable = True
+    task.conversion_parts_completed = 0
+    task.conversion_progress = 0.0
+
+    window._apply_task_to_preview(task)
+
+    assert window.conversion_detail_label.text() == "可继续转换"
+
+
+def test_delete_state_button_sits_at_the_row_end(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    window.show()
+    qtbot.waitExposed(window)
+
+    frame = window.conversion_progress_frame
+    button = window.clear_state_button
+
+    assert button.isVisibleTo(window)
+    assert button.geometry().right() >= frame.width() - 20
+    assert button.geometry().left() > window.resume_conversion_button.geometry().right()
 
 
 def test_converting_row_shows_remaining_time_on_the_right(

@@ -1057,10 +1057,10 @@ class MainWindow(QMainWindow):
         self.open_folder_button.setObjectName("SecondaryAction")
         self.open_folder_button.clicked.connect(self._open_output_folder)
         result_actions.addWidget(self.resume_conversion_button)
-        result_actions.addWidget(self.clear_state_button)
         result_actions.addWidget(self.open_file_button)
         result_actions.addWidget(self.open_folder_button)
         result_actions.addStretch(1)
+        result_actions.addWidget(self.clear_state_button)
 
         progress_layout.addLayout(progress_heading)
         progress_layout.addWidget(self.conversion_progress_bar)
@@ -2073,10 +2073,12 @@ class MainWindow(QMainWindow):
             self.conversion_detail_label.setText(output_text)
         elif task.status == TaskStatus.CANCELLED:
             self.conversion_status_label.setText("已取消")
-            if task.conversion_resumable:
+            if self._has_kept_progress(task):
                 self.conversion_detail_label.setText(
                     f"已保留 {task.conversion_progress:.0f}% 进度，可继续转换"
                 )
+            elif task.conversion_resumable:
+                self.conversion_detail_label.setText("可继续转换")
             else:
                 self.conversion_detail_label.setText("未生成输出文件")
         elif task.status == TaskStatus.FAILED:
@@ -2218,7 +2220,7 @@ class MainWindow(QMainWindow):
         task = self.tasks.get(task_key) if task_key else None
         if task is None or task.status != TaskStatus.CANCELLED:
             return
-        had_parts = task.conversion_resumable
+        had_parts = self._has_kept_progress(task)
         if had_parts and not self._confirm_discard_progress(task):
             return
         self._discard_conversion_parts(task)
@@ -2256,6 +2258,11 @@ class MainWindow(QMainWindow):
         dialog.setDefaultButton(cancel_button)
         dialog.exec()
         return dialog.clickedButton() is delete_button
+
+    @staticmethod
+    def _has_kept_progress(task: MediaTask) -> bool:
+        """True once a resumable cancellation has at least one finished segment."""
+        return task.conversion_resumable and task.conversion_parts_completed > 0
 
     @staticmethod
     def _discard_conversion_parts(task: MediaTask) -> None:
