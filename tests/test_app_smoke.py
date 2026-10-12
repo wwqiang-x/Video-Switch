@@ -47,6 +47,16 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.add_video_button._icon_pixmap.isNull() is False
     add_icon_size = window.add_video_button._icon_pixmap.deviceIndependentSize()
     assert round(add_icon_size.height()) == window.add_video_button.fontMetrics().height()
+    metrics = window.add_video_button.fontMetrics()
+    expected_width = max(
+        88,
+        4
+        + metrics.height()
+        + 6
+        + metrics.horizontalAdvance("添加视频")
+        + metrics.horizontalAdvance("添"),
+    )
+    assert window.add_video_button.sizeHint().width() == expected_width
     assert window.clear_button.width() == 34
     assert window.clear_button.icon().isNull() is False
     assert window.theme_button.icon().isNull() is False

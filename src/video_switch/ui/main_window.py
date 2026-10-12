@@ -269,8 +269,11 @@ class AddVideoButton(QPushButton):
 
     def sizeHint(self) -> QSize:
         metrics = self.fontMetrics()
-        width = metrics.horizontalAdvance(self._label) + metrics.height() + 62
-        return QSize(width, 38)
+        icon_size = metrics.height()
+        text_width = metrics.horizontalAdvance(self._label)
+        first_character_width = metrics.horizontalAdvance(self._label[0])
+        width = 4 + icon_size + 6 + text_width + first_character_width
+        return QSize(max(88, width), 38)
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
@@ -298,13 +301,10 @@ class AddVideoButton(QPushButton):
             if not self._icon_pixmap.isNull()
             else QSize()
         )
-        text_x = (self.width() - text_width) // 2
-        first_character_center = text_x + first_character_width / 2
-        icon_center = first_character_center / 2
-        icon_x = max(
-            4,
-            round(icon_center - icon_size.width() / 2),
-        )
+        right_padding = first_character_width
+        text_x = self.width() - right_padding - text_width
+        gap = 6
+        icon_x = max(4, text_x - gap - icon_size.width())
 
         icon_y = (self.height() - icon_size.height()) // 2
         if not self._icon_pixmap.isNull():
