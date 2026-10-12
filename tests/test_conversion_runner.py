@@ -1,6 +1,10 @@
 """Tests for FFmpeg conversion progress parsing."""
 
+from PySide6.QtCore import QProcess
+
 from video_switch.services.conversion_runner import (
+    CANCEL_KILL_TIMEOUT_MS,
+    ConversionRunner,
     build_progress,
     parse_ffmpeg_time,
 )
@@ -42,3 +46,17 @@ def test_progress_end_is_complete() -> None:
 
     assert progress is not None
     assert progress.percent == 100.0
+
+
+def test_cancel_uses_a_short_kill_fallback(qtbot) -> None:
+    """The kill fallback is what actually stops FFmpeg on Windows."""
+    del qtbot  # only needed so a QApplication exists for QProcess and QTimer
+    runner = ConversionRunner()
+    runner._process = QProcess()
+
+    runner.cancel()
+
+    assert runner._cancel_requested is True
+    assert runner._kill_timer.isActive()
+    assert runner._kill_timer.interval() == CANCEL_KILL_TIMEOUT_MS
+    assert CANCEL_KILL_TIMEOUT_MS <= 500

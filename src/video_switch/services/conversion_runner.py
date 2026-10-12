@@ -15,7 +15,10 @@ from video_switch.services.ffmpeg_command import (
     unique_output_path,
 )
 
-CANCEL_KILL_TIMEOUT_MS = 1500
+# Qt's terminate() only posts WM_CLOSE on Windows, which a console FFmpeg process
+# never receives, so the fallback kill defines the real cancel latency. The
+# in-flight segment is discarded anyway, so a long grace period buys nothing.
+CANCEL_KILL_TIMEOUT_MS = 250
 MAX_LOG_CHARACTERS = 200_000
 SEGMENT_DURATION_SECONDS = 30.0
 RESUMABLE_FORMATS = {"MP4", "MKV", "WebM", "MP3", "WAV"}

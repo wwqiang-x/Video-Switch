@@ -2,7 +2,7 @@
 
 from video_switch.models.media_info import MediaInfo
 from video_switch.models.media_task import TaskStatus
-from video_switch.services.conversion_runner import ConversionResult
+from video_switch.services.conversion_runner import ConversionResult, ConversionRunner
 from video_switch.services.history_store import ConversionHistoryStore
 from video_switch.ui.main_window import MainWindow
 
@@ -320,3 +320,27 @@ def test_cancelled_conversion_result_keeps_progress(
     assert task.status == TaskStatus.CANCELLED
     assert task.conversion_progress == 58.0
     assert task.conversion_resumable is True
+
+
+def test_cancel_updates_the_row_immediately(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+    monkeypatch,
+) -> None:
+    window, task = _cancelled_task_window(qtbot, tmp_path, isolated_settings)
+    task.status = TaskStatus.CONVERTING
+    window._apply_task_to_preview(task)
+    cancelled: list[bool] = []
+    monkeypatch.setattr(ConversionRunner, "is_running", property(lambda self: True))
+    monkeypatch.setattr(ConversionRunner, "cancel", lambda self: cancelled.append(True))
+    try:
+        window._cancel_conversion()
+    finally:
+        # Leaving is_running True would make the close-while-running dialog pop
+        # up during widget teardown and block the suite.
+        monkeypatch.undo()
+
+    assert window.conversion_status_label.text() == "正在取消"
+    assert window.cancel_button.isEnabled() is False
+    assert cancelled == [True]
