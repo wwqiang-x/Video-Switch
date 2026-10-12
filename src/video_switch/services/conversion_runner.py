@@ -1,5 +1,7 @@
-"""Run one FFmpeg conversion at a time and report progress."""
+"""Run FFmpeg conversions with progress, cancellation, and resumable segments."""
 
+import hashlib
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +17,8 @@ from video_switch.services.ffmpeg_command import (
 
 CANCEL_KILL_TIMEOUT_MS = 1500
 MAX_LOG_CHARACTERS = 200_000
+SEGMENT_DURATION_SECONDS = 30.0
+RESUMABLE_FORMATS = {"MP4", "MKV", "WebM", "MP3", "WAV"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +46,8 @@ class ConversionResult:
     error: str | None
     log: str
     elapsed_seconds: float
+    can_resume: bool = False
+    progress_percent: float = 0.0
 
 
 def parse_ffmpeg_time(value: str) -> float | None:
@@ -108,7 +114,7 @@ def build_progress(
 
 
 class ConversionRunner(QObject):
-    """Execute a single FFmpeg conversion and publish live progress."""
+    """Execute one conversion, optionally using resumable 30-second segments."""
 
     started = Signal(str, object)
     progress = Signal(object)
@@ -118,17 +124,26 @@ class ConversionRunner(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._process: QProcess | None = None
+        self._task: MediaTask | None = None
         self._task_key = ""
         self._source_key = ""
         self._source_path = Path()
         self._output_format = ""
         self._output_path: Path | None = None
-        self._duration_seconds: float | None = None
+        self._ffmpeg_path: Path | None = None
+        self._settings: ConversionSettings | None = None
+        self._total_duration = 0.0
+        self._completed_duration = 0.0
+        self._segment_limit = 0.0
+        self._part_dir: Path | None = None
+        self._part_paths: list[Path] = []
+        self._current_part: Path | None = None
+        self._concat_list: Path | None = None
+        self._mode = ""
         self._cancel_requested = False
         self._completed = False
         self._started_at = 0.0
         self._stdout_buffer = ""
-        self._stderr_buffer = ""
         self._log_parts: list[str] = []
         self._progress_data: dict[str, str] = {}
         self._kill_timer = QTimer(self)
@@ -146,49 +161,45 @@ class ConversionRunner(QObject):
         output_directory: Path | None,
         ffmpeg_path: Path,
     ) -> Path:
-        """Start one conversion and return the chosen output path."""
+        """Start or resume one conversion and return the final output path."""
         if self.is_running:
             raise RuntimeError("已有转换任务正在执行")
         if task.media_info is None:
             raise ValueError("任务尚未读取媒体信息")
 
-        output_path = unique_output_path(
-            task.path,
-            settings,
-            output_directory,
-        )
+        output_path = unique_output_path(task.path, settings, output_directory)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        args = build_ffmpeg_args(
-            settings,
-            task.path,
-            output_path,
-            report_progress=True,
-        )
-
+        self._task = task
         self._task_key = task.key
         self._source_key = task.content_signature
         self._source_path = task.path
         self._output_format = settings.output_format
         self._output_path = output_path
-        self._duration_seconds = task.media_info.duration_seconds
+        self._ffmpeg_path = ffmpeg_path
+        self._settings = settings
+        self._total_duration = task.media_info.duration_seconds or 0.0
         self._cancel_requested = False
         self._completed = False
         self._started_at = time.monotonic()
         self._stdout_buffer = ""
-        self._stderr_buffer = ""
         self._log_parts = []
         self._progress_data = {}
+        self._part_paths = []
+        self._current_part = None
+        self._concat_list = None
 
-        process = QProcess(self)
-        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
-        process.readyReadStandardOutput.connect(self._read_stdout)
-        process.readyReadStandardError.connect(self._read_stderr)
-        process.finished.connect(self._on_finished)
-        process.errorOccurred.connect(self._on_error)
-        self._process = process
         self.started.emit(task.key, output_path)
-        process.start(str(ffmpeg_path), args)
+        if (
+            settings.output_format in RESUMABLE_FORMATS
+            and self._total_duration > SEGMENT_DURATION_SECONDS
+        ):
+            self._mode = "segment"
+            self._prepare_segmented_resume(task, settings, output_path)
+        else:
+            self._mode = "single"
+            task.conversion_resumable = False
+            self._start_single(output_path)
         return output_path
 
     def cancel(self) -> None:
@@ -200,18 +211,136 @@ class ConversionRunner(QObject):
         self._kill_timer.start(CANCEL_KILL_TIMEOUT_MS)
 
     def shutdown(self) -> None:
-        """Stop FFmpeg immediately and remove any partial output."""
+        """Stop immediately and remove only the incomplete current output."""
         self._cancel_requested = True
         self._kill_timer.stop()
         if self._process is not None:
             self._process.kill()
             self._process.waitForFinished(2000)
+        self._remove_current_part()
         self._remove_output()
         self._process = None
-        self._output_path = None
+
+    def _prepare_segmented_resume(
+        self,
+        task: MediaTask,
+        settings: ConversionSettings,
+        output_path: Path,
+    ) -> None:
+        digest = hashlib.sha256(repr(settings).encode("utf-8")).hexdigest()[:16]
+        part_dir = output_path.parent / f".{output_path.stem}.{digest}.parts"
+        resume_matches = (
+            task.conversion_part_dir == part_dir and task.conversion_settings_key == digest
+        )
+        if not resume_matches:
+            if task.conversion_part_dir is not None and task.conversion_part_dir != part_dir:
+                shutil.rmtree(task.conversion_part_dir, ignore_errors=True)
+            if part_dir.exists():
+                shutil.rmtree(part_dir, ignore_errors=True)
+            task.conversion_parts_completed = 0
+
+        part_dir.mkdir(parents=True, exist_ok=True)
+        task.conversion_part_dir = part_dir
+        task.conversion_settings_key = digest
+        task.conversion_resumable = True
+        self._part_dir = part_dir
+        self._part_paths = sorted(part_dir.glob(f"part_*{output_path.suffix}"))
+        task.conversion_parts_completed = len(self._part_paths)
+        self._completed_duration = min(
+            self._total_duration,
+            len(self._part_paths) * SEGMENT_DURATION_SECONDS,
+        )
+
+        if self._completed_duration >= self._total_duration:
+            self._start_concat()
+        else:
+            self._start_next_segment()
+
+    def _start_next_segment(self) -> None:
+        if self._output_path is None or self._part_dir is None or self._settings is None:
+            return
+        segment_start = self._completed_duration
+        segment_duration = min(
+            SEGMENT_DURATION_SECONDS,
+            max(0.01, self._total_duration - segment_start),
+        )
+        self._segment_limit = segment_duration
+        self._current_part = self._part_dir / (
+            f"part_{len(self._part_paths):05d}{self._output_path.suffix}"
+        )
+        self._current_part.unlink(missing_ok=True)
+        args = build_ffmpeg_args(
+            self._settings,
+            self._source_path,
+            self._current_part,
+            report_progress=True,
+            start_seconds=segment_start,
+            segment_duration=segment_duration,
+        )
+        self._start_process(args)
+
+    def _start_concat(self) -> None:
+        if self._output_path is None or self._part_dir is None:
+            return
+        self._mode = "concat"
+        self._concat_list = self._part_dir / "parts.txt"
+        lines = []
+        for part in self._part_paths:
+            escaped = part.as_posix().replace("'", "'\\''")
+            lines.append(f"file '{escaped}'")
+        self._concat_list.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.progress.emit(
+            ConversionProgress(
+                task_key=self._task_key,
+                percent=99.9,
+                processed_seconds=self._total_duration,
+                speed=None,
+                eta_seconds=0.0,
+            )
+        )
+        self._start_process(
+            [
+                "-hide_banner",
+                "-loglevel",
+                "warning",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(self._concat_list),
+                "-c",
+                "copy",
+                str(self._output_path),
+            ]
+        )
+
+    def _start_single(self, output_path: Path) -> None:
+        if self._settings is None:
+            return
+        args = build_ffmpeg_args(
+            self._settings,
+            self._source_path,
+            output_path,
+            report_progress=True,
+        )
+        self._start_process(args)
+
+    def _start_process(self, args: list[str]) -> None:
+        if self._ffmpeg_path is None:
+            return
+        process = QProcess(self)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        process.readyReadStandardOutput.connect(self._read_stdout)
+        process.readyReadStandardError.connect(self._read_stderr)
+        process.finished.connect(self._on_finished)
+        process.errorOccurred.connect(self._on_error)
+        self._process = process
+        process.start(str(self._ffmpeg_path), args)
 
     def _read_stdout(self) -> None:
-        if self._process is None:
+        if self._process is None or self.sender() is not self._process:
             return
         chunk = bytes(self._process.readAllStandardOutput()).decode(
             "utf-8",
@@ -223,32 +352,56 @@ class ConversionRunner(QObject):
             self._handle_progress_line(line.strip())
 
     def _read_stderr(self) -> None:
-        if self._process is None:
+        if self._process is None or self.sender() is not self._process:
             return
         chunk = bytes(self._process.readAllStandardError()).decode(
             "utf-8",
             errors="replace",
         )
-        if not chunk:
-            return
-        self._stderr_buffer += chunk
-        self._append_log(chunk)
+        if chunk:
+            self._append_log(chunk)
 
     def _handle_progress_line(self, line: str) -> None:
-        if not line or "=" not in line:
+        if not line or "=" not in line or self._mode == "concat":
             return
         key, value = line.split("=", maxsplit=1)
         self._progress_data[key] = value
         if key != "progress":
             return
+        self._emit_segment_progress()
+        self._progress_data = {}
+
+    def _emit_segment_progress(self) -> None:
         parsed = build_progress(
             self._task_key,
             self._progress_data,
-            self._duration_seconds,
+            self._segment_limit,
         )
-        self._progress_data = {}
-        if parsed is not None:
-            self.progress.emit(parsed)
+        if parsed is None:
+            return
+        segment_processed = parsed.processed_seconds or 0.0
+        total_processed = min(
+            self._total_duration,
+            self._completed_duration + segment_processed,
+        )
+        percent = (
+            100.0
+            if self._total_duration <= 0
+            else min(99.9, total_processed / self._total_duration * 100)
+        )
+        speed_value = parse_speed(parsed.speed or "")
+        eta = None
+        if speed_value and speed_value > 0:
+            eta = max(0.0, (self._total_duration - total_processed) / speed_value)
+        self.progress.emit(
+            ConversionProgress(
+                task_key=self._task_key,
+                percent=percent,
+                processed_seconds=total_processed,
+                speed=parsed.speed,
+                eta_seconds=eta,
+            )
+        )
 
     def _append_log(self, text: str) -> None:
         self._log_parts.append(text)
@@ -263,95 +416,154 @@ class ConversionRunner(QObject):
         exit_status: QProcess.ExitStatus,
     ) -> None:
         del exit_status
-        if self._completed or self._process is None or self._output_path is None:
+        if self._completed or self._process is None:
             return
         self._completed = True
         self._kill_timer.stop()
         self._read_stderr()
-        log = "".join(self._log_parts)
         elapsed = max(0.0, time.monotonic() - self._started_at)
+        log = "".join(self._log_parts)
 
+        if self._mode == "single":
+            self._finish_single(exit_code, log, elapsed)
+        elif self._mode == "segment":
+            self._finish_segment(exit_code, log, elapsed)
+        else:
+            self._finish_concat(exit_code, log, elapsed)
+
+    def _finish_single(self, exit_code: int, log: str, elapsed: float) -> None:
+        if self._output_path is None:
+            return
         if self._cancel_requested:
             self._remove_output()
-            self._finish_result(
-                ConversionResult(
-                    task_key=self._task_key,
-                    source_key=self._source_key,
-                    source_path=self._source_path,
-                    output_format=self._output_format,
-                    output_path=self._output_path,
-                    success=False,
-                    cancelled=True,
-                    error="转换已取消",
-                    log=log,
-                    elapsed_seconds=elapsed,
-                )
-            )
-            return
-
-        if exit_code == 0 and self._output_path.is_file():
-            self._finish_result(
-                ConversionResult(
-                    task_key=self._task_key,
-                    source_key=self._source_key,
-                    source_path=self._source_path,
-                    output_format=self._output_format,
-                    output_path=self._output_path,
-                    success=True,
-                    cancelled=False,
-                    error=None,
-                    log=log,
-                    elapsed_seconds=elapsed,
-                )
-            )
-            return
-
-        self._remove_output()
-        error = self._last_log_line(log) or "FFmpeg 转换失败"
-        self._finish_result(
-            ConversionResult(
-                task_key=self._task_key,
-                source_key=self._source_key,
-                source_path=self._source_path,
-                output_format=self._output_format,
-                output_path=self._output_path,
-                success=False,
+            self._emit_result(cancelled=True, error="转换已取消", log=log, elapsed=elapsed)
+        elif exit_code == 0 and self._output_path.is_file():
+            self._emit_result(cancelled=False, error=None, log=log, elapsed=elapsed)
+        else:
+            self._remove_output()
+            self._emit_result(
                 cancelled=False,
-                error=error,
+                error=self._last_log_line(log) or "FFmpeg 转换失败",
                 log=log,
-                elapsed_seconds=elapsed,
+                elapsed=elapsed,
             )
+
+    def _finish_segment(self, exit_code: int, log: str, elapsed: float) -> None:
+        if self._cancel_requested:
+            self._remove_current_part()
+            self._emit_result(
+                cancelled=True,
+                error="转换已取消",
+                log=log,
+                elapsed=elapsed,
+                can_resume=True,
+            )
+            return
+        if exit_code != 0 or self._current_part is None or not self._current_part.is_file():
+            self._remove_current_part()
+            self._emit_result(
+                cancelled=False,
+                error=self._last_log_line(log) or "分段转换失败",
+                log=log,
+                elapsed=elapsed,
+                can_resume=bool(self._part_paths),
+            )
+            return
+
+        self._part_paths.append(self._current_part)
+        self._completed_duration = min(
+            self._total_duration,
+            self._completed_duration + self._segment_limit,
         )
+        if self._task is not None:
+            self._task.conversion_parts_completed = len(self._part_paths)
+        self._current_part = None
+        self._completed = False
+        if self._completed_duration >= self._total_duration:
+            self._start_concat()
+        else:
+            self._start_next_segment()
+
+    def _finish_concat(self, exit_code: int, log: str, elapsed: float) -> None:
+        if self._output_path is None:
+            return
+        if self._cancel_requested:
+            self._remove_output()
+            self._emit_result(
+                cancelled=True,
+                error="转换已取消",
+                log=log,
+                elapsed=elapsed,
+                can_resume=True,
+            )
+            return
+        if exit_code == 0 and self._output_path.is_file():
+            self._cleanup_parts()
+            self._emit_result(cancelled=False, error=None, log=log, elapsed=elapsed)
+        else:
+            self._remove_output()
+            self._emit_result(
+                cancelled=False,
+                error=self._last_log_line(log) or "合并输出失败",
+                log=log,
+                elapsed=elapsed,
+                can_resume=True,
+            )
+
+    def _emit_result(
+        self,
+        cancelled: bool,
+        error: str | None,
+        log: str,
+        elapsed: float,
+        can_resume: bool = False,
+    ) -> None:
+        if self._output_path is None:
+            return
+        if self._task is not None:
+            self._task.conversion_resumable = can_resume
+        result = ConversionResult(
+            task_key=self._task_key,
+            source_key=self._source_key,
+            source_path=self._source_path,
+            output_format=self._output_format,
+            output_path=self._output_path,
+            success=not cancelled and error is None,
+            cancelled=cancelled,
+            error=error,
+            log=log,
+            elapsed_seconds=elapsed,
+            can_resume=can_resume,
+            progress_percent=(
+                100.0
+                if not cancelled and error is None
+                else (
+                    min(99.9, self._completed_duration / self._total_duration * 100)
+                    if self._total_duration > 0
+                    else 0.0
+                )
+            ),
+        )
+        self._process = None
+        self._output_path = None
+        self.finished.emit(result)
 
     def _on_error(self, error: QProcess.ProcessError) -> None:
         if error != QProcess.ProcessError.FailedToStart or self._completed:
             return
         self._completed = True
         self._kill_timer.stop()
-        output_path = self._output_path or Path()
-        self._finish_result(
-            ConversionResult(
-                task_key=self._task_key,
-                source_key=self._source_key,
-                source_path=self._source_path,
-                output_format=self._output_format,
-                output_path=output_path,
-                success=False,
-                cancelled=False,
-                error="无法启动 FFmpeg，请检查环境设置",
-                log="".join(self._log_parts),
-                elapsed_seconds=max(0.0, time.monotonic() - self._started_at),
-            )
+        self._emit_result(
+            cancelled=False,
+            error="无法启动 FFmpeg，请检查环境设置",
+            log="".join(self._log_parts),
+            elapsed=max(0.0, time.monotonic() - self._started_at),
+            can_resume=bool(self._part_paths),
         )
 
     def _force_kill(self) -> None:
         if self._process is not None:
             self._process.kill()
-
-    def _finish_result(self, result: ConversionResult) -> None:
-        self._process = None
-        self._output_path = None
-        self.finished.emit(result)
 
     def _remove_output(self) -> None:
         if self._output_path is None:
@@ -360,6 +572,23 @@ class ConversionRunner(QObject):
             self._output_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+    def _remove_current_part(self) -> None:
+        if self._current_part is None:
+            return
+        try:
+            self._current_part.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _cleanup_parts(self) -> None:
+        if self._part_dir is not None:
+            shutil.rmtree(self._part_dir, ignore_errors=True)
+        if self._task is not None:
+            self._task.conversion_part_dir = None
+            self._task.conversion_parts_completed = 0
+            self._task.conversion_settings_key = ""
+            self._task.conversion_resumable = False
 
     @staticmethod
     def _last_log_line(log: str) -> str:

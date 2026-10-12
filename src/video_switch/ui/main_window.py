@@ -1,5 +1,6 @@
 """Main desktop window and step-one interface shell."""
 
+import shutil
 import time
 from datetime import datetime
 from math import ceil
@@ -116,6 +117,7 @@ FOLDER_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" /
 REFRESH_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "refresh.svg"
 APP_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "app.svg"
 RUN_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "run.svg"
+DELETE_ICON_PATH = Path(__file__).resolve().parents[1] / "resources" / "icons" / "delete.svg"
 VIDEO_FILE_FILTER = (
     "视频文件 (*.mp4 *.mkv *.mov *.avi *.webm *.flv *.m4v *.wmv *.mpg *.mpeg *.ts *.3gp);;"
     "所有文件 (*)"
@@ -1037,9 +1039,15 @@ class MainWindow(QMainWindow):
         result_actions.setSpacing(8)
         self.resume_conversion_button = QPushButton("恢复转换")
         self.resume_conversion_button.setObjectName("SecondaryAction")
-        self.resume_conversion_button.setToolTip("从开始重新执行转换")
+        self.resume_conversion_button.setToolTip("从上次中断的位置继续转换")
         self.resume_conversion_button.clicked.connect(self._resume_conversion)
         self.resume_conversion_button.hide()
+        self.clear_state_button = AssetIconButton(
+            "AssetIconButton",
+            "删除当前取消状态",
+        )
+        self.clear_state_button.clicked.connect(self._clear_cancelled_state)
+        self.clear_state_button.hide()
         self.open_file_button = QPushButton("打开文件")
         self.open_file_button.setObjectName("SecondaryAction")
         self.open_file_button.clicked.connect(self._open_output_file)
@@ -1047,6 +1055,7 @@ class MainWindow(QMainWindow):
         self.open_folder_button.setObjectName("SecondaryAction")
         self.open_folder_button.clicked.connect(self._open_output_folder)
         result_actions.addWidget(self.resume_conversion_button)
+        result_actions.addWidget(self.clear_state_button)
         result_actions.addWidget(self.open_file_button)
         result_actions.addWidget(self.open_folder_button)
         result_actions.addStretch(1)
@@ -1948,6 +1957,7 @@ class MainWindow(QMainWindow):
         self.history_section.hide()
         self.history_list.clear()
         self.resume_conversion_button.hide()
+        self.clear_state_button.hide()
         self._update_conversion_controls()
 
     def _probe_pending_tasks(self) -> None:
@@ -2061,7 +2071,10 @@ class MainWindow(QMainWindow):
             self.conversion_detail_label.setText(output_text)
         elif task.status == TaskStatus.CANCELLED:
             self.conversion_status_label.setText("已取消")
-            self.conversion_detail_label.setText("未生成输出文件")
+            if task.conversion_resumable:
+                self.conversion_detail_label.setText("已保留已完成进度，可继续转换")
+            else:
+                self.conversion_detail_label.setText("未生成输出文件")
         elif task.status == TaskStatus.FAILED:
             self.conversion_status_label.setText("转换失败")
             self.conversion_detail_label.setText(task.conversion_error or "未知错误")
@@ -2071,7 +2084,15 @@ class MainWindow(QMainWindow):
             and task.output_path is not None
             and task.output_path.is_file()
         )
-        self.resume_conversion_button.setVisible(task.status == TaskStatus.CANCELLED)
+        cancelled = task.status == TaskStatus.CANCELLED
+        self.resume_conversion_button.setVisible(cancelled)
+        if task.conversion_resumable:
+            self.resume_conversion_button.setText("继续转换")
+            self.resume_conversion_button.setToolTip("从上次中断的位置继续转换")
+        else:
+            self.resume_conversion_button.setText("重新转换")
+            self.resume_conversion_button.setToolTip("从开始重新执行转换")
+        self.clear_state_button.setVisible(cancelled)
         self.open_file_button.setVisible(has_output)
         self.open_folder_button.setVisible(has_output)
 
@@ -2176,22 +2197,56 @@ class MainWindow(QMainWindow):
         if task is None or task.status != TaskStatus.CANCELLED:
             return
         task.status = TaskStatus.METADATA_READY
-        task.conversion_progress = 0.0
         task.conversion_error = None
         task.conversion_speed = None
         task.conversion_eta_seconds = None
         task.output_path = None
+        if not task.conversion_resumable:
+            self._discard_conversion_parts(task)
+            task.conversion_progress = 0.0
         self._update_task_item(task)
         self._apply_task_to_preview(task)
         self._start_conversion()
+
+    def _clear_cancelled_state(self) -> None:
+        """Drop a cancelled conversion so the task looks freshly imported."""
+        task_key = self._current_task_key()
+        task = self.tasks.get(task_key) if task_key else None
+        if task is None or task.status != TaskStatus.CANCELLED:
+            return
+        self._discard_conversion_parts(task)
+        task.conversion_error = None
+        task.conversion_summary = None
+        task.conversion_format = None
+        task.conversion_progress = 0.0
+        task.conversion_speed = None
+        task.conversion_eta_seconds = None
+        task.conversion_log = ""
+        task.output_path = None
+        task.status = TaskStatus.METADATA_READY
+        self._update_task_item(task)
+        self._apply_task_to_preview(task)
+        self._show_footer_message("已清除取消状态", timeout=4000)
+
+    @staticmethod
+    def _discard_conversion_parts(task: MediaTask) -> None:
+        """Remove leftover segment files and their bookkeeping."""
+        if task.conversion_part_dir is not None:
+            shutil.rmtree(task.conversion_part_dir, ignore_errors=True)
+        task.conversion_part_dir = None
+        task.conversion_parts_completed = 0
+        task.conversion_settings_key = ""
+        task.conversion_resumable = False
 
     def _on_conversion_started(self, task_key: str, output_path: object) -> None:
         task = self.tasks.get(task_key)
         if task is None:
             return
+        resuming = task.conversion_resumable
         task.status = TaskStatus.CONVERTING
         task.output_path = Path(output_path)
-        task.conversion_progress = 0.0
+        if not resuming:
+            task.conversion_progress = 0.0
         task.conversion_speed = None
         task.conversion_eta_seconds = None
         task.conversion_log = ""
@@ -2231,6 +2286,7 @@ class MainWindow(QMainWindow):
         task = self.tasks.get(result.task_key)
         if task is None:
             return
+        task.conversion_resumable = result.can_resume
         task.output_path = result.output_path
         task.conversion_log = result.log
         task.conversion_speed = None
@@ -2238,6 +2294,9 @@ class MainWindow(QMainWindow):
         if result.cancelled:
             task.status = TaskStatus.CANCELLED
             task.conversion_error = "转换已取消"
+            task.conversion_progress = result.progress_percent
+            if not result.can_resume:
+                self._discard_conversion_parts(task)
             footer_message = f"已取消转换 {task.display_name}"
         elif result.success:
             task.status = TaskStatus.COMPLETED
@@ -2554,6 +2613,7 @@ class MainWindow(QMainWindow):
         self.probe_service.cancel_task(task_key)
         self.thumbnail_service.cancel_task(task_key)
         self.thumbnail_service.delete_cached(task.content_signature)
+        self._discard_conversion_parts(task)
         if history_action == "delete":
             self.history_records = self.history_store.delete_by_source_key(task.content_signature)
             self._refresh_history_list()
@@ -2605,6 +2665,7 @@ class MainWindow(QMainWindow):
         self.thumbnail_service.cancel_all()
         for task in self.tasks.values():
             self.thumbnail_service.delete_cached(task.content_signature)
+            self._discard_conversion_parts(task)
         self.tasks.clear()
         self.task_items.clear()
         self.task_list.clear()
@@ -2860,6 +2921,8 @@ class MainWindow(QMainWindow):
         if self.advanced_section.help_button is not None:
             self.advanced_section.help_button.set_hover_color(palette.help_hover)
         self.start_button.set_asset_icon(RUN_ICON_PATH, "#ffffff")
+        self.clear_state_button.set_asset_icon(DELETE_ICON_PATH, palette.danger)
+        self.clear_state_button.set_hover_color(palette.help_hover)
         self.regenerate_thumbnail_button.set_asset_icon(
             REFRESH_ICON_PATH,
             palette.text,

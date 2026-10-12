@@ -49,6 +49,34 @@ def test_audio_only_command() -> None:
     assert "192k" in args
 
 
+def test_segment_command_seeks_before_input_and_limits_duration() -> None:
+    args = build_ffmpeg_args(
+        ConversionSettings(),
+        Path("input.mp4"),
+        Path("part_00001.mp4"),
+        report_progress=True,
+        start_seconds=30.0,
+        segment_duration=30.0,
+    )
+
+    assert args[args.index("-ss") + 1] == "30.000"
+    assert args.index("-ss") < args.index("-i")
+    assert args[args.index("-t") + 1] == "30.000"
+    assert args.index("-t") > args.index("-i")
+    assert args[-1] == "part_00001.mp4"
+
+
+def test_full_command_has_no_segment_flags() -> None:
+    args = build_ffmpeg_args(
+        ConversionSettings(),
+        Path("input.mp4"),
+        Path("output.mp4"),
+    )
+
+    assert "-ss" not in args
+    assert "-t" not in args
+
+
 def test_webm_command_uses_vp9_and_opus() -> None:
     settings = ConversionSettings(
         output_format="WebM",

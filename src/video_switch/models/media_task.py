@@ -43,6 +43,10 @@ class MediaTask:
     conversion_error: str | None = None
     conversion_format: str | None = None
     conversion_summary: str | None = None
+    conversion_part_dir: Path | None = None
+    conversion_parts_completed: int = 0
+    conversion_settings_key: str = ""
+    conversion_resumable: bool = False
 
     @property
     def display_name(self) -> str:

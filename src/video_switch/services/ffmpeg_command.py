@@ -62,16 +62,26 @@ def build_ffmpeg_args(
     input_path: Path | None,
     output_path: Path,
     report_progress: bool = False,
+    start_seconds: float | None = None,
+    segment_duration: float | None = None,
 ) -> list[str]:
     """Build ffmpeg arguments without executing a conversion."""
     args = [
         "-hide_banner",
         "-loglevel",
         "warning",
-        "-y",
-        "-i",
-        str(input_path) if input_path is not None else "<输入文件>",
     ]
+    if start_seconds is not None:
+        args.extend(["-ss", f"{start_seconds:.3f}"])
+    args.extend(
+        [
+            "-y",
+            "-i",
+            str(input_path) if input_path is not None else "<输入文件>",
+        ]
+    )
+    if segment_duration is not None:
+        args.extend(["-t", f"{segment_duration:.3f}"])
 
     if settings.output_format == "GIF":
         args.extend(
