@@ -1861,15 +1861,11 @@ class MainWindow(QMainWindow):
         self.batch_progress_bar.setFixedSize(120, 6)
         self.batch_progress_bar.hide()
 
-        stage_label = QLabel("开发阶段 · 步骤 10")
-        stage_label.setProperty("muted", True)
-
         layout.addWidget(self.status_dot)
         layout.addWidget(self.footer_status_label)
         layout.addStretch(1)
         layout.addWidget(self.batch_status_label)
         layout.addWidget(self.batch_progress_bar)
-        layout.addWidget(stage_label)
         return footer
 
     def _choose_videos(self) -> None:
