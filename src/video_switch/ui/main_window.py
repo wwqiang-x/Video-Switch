@@ -12,6 +12,7 @@ from PySide6.QtCore import (
     QByteArray,
     QEvent,
     QPointF,
+    QPropertyAnimation,
     QRect,
     QRectF,
     QSettings,
@@ -47,6 +48,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -153,7 +155,9 @@ AUDIO_BITRATE_OPTIONS = ("128 kbps", "192 kbps", "256 kbps", "320 kbps")
 NOT_APPLICABLE = "不适用"
 MESSAGE_ICON_SIZE = 44
 RESUME_DIRS_KEY = "conversion/resume_dirs"
-ACTION_BUTTON_WIDTH = 104
+ACTION_BUTTON_MIN_WIDTH = 88
+THUMBNAIL_FADE_MS = 180
+PROGRESS_UI_INTERVAL_MS = 200
 
 
 def _progress_percent(value: float) -> int:
@@ -243,6 +247,7 @@ class HelpIconButton(QToolButton):
         super().__init__()
         self.setObjectName(object_name)
         self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
         self.setFixedSize(22, 22)
         self.setIconSize(QSize(15, 15))
         self.setIcon(_question_icon())
@@ -274,6 +279,7 @@ class AssetIconButton(QToolButton):
         super().__init__()
         self.setObjectName(object_name)
         self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
         self.setFixedSize(34, 34)
         self.setIconSize(QSize(18, 18))
         self._hover_color = QColor("#e2e8f0")
@@ -650,12 +656,25 @@ class ThumbnailLabel(QLabel):
         self.setMinimumSize(320, 180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._source_pixmap = QPixmap()
+        self._fade_effect = QGraphicsOpacityEffect(self)
+        self._fade_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._fade_effect)
+        self._fade = QPropertyAnimation(self._fade_effect, b"opacity", self)
+        self._fade.setDuration(THUMBNAIL_FADE_MS)
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
 
     def set_source_pixmap(self, pixmap: QPixmap) -> None:
+        faded_in = self._source_pixmap.isNull() and not pixmap.isNull()
         self._source_pixmap = pixmap
         self._refresh_pixmap()
+        if faded_in:
+            self._fade.stop()
+            self._fade.start()
 
     def clear_source_pixmap(self) -> None:
+        self._fade.stop()
+        self._fade_effect.setOpacity(1.0)
         self._source_pixmap = QPixmap()
         self.clear()
 
@@ -747,6 +766,7 @@ class MainWindow(QMainWindow):
         self.batch_total = 0
         self.batch_index = 0
         self.batch_counts = {"success": 0, "failed": 0, "cancelled": 0, "skipped": 0}
+        self._progress_ui_at: dict[str, float] = {}
         self._loading_conversion_settings = True
         self.format_help_dialog: FormatHelpDialog | None = None
         self.advanced_help_dialog: AdvancedHelpDialog | None = None
@@ -802,6 +822,16 @@ class MainWindow(QMainWindow):
 
     def _save_window_geometry(self) -> None:
         self.settings.setValue("ui/window_geometry", self.saveGeometry())
+
+    @staticmethod
+    def _pin_action_width(button: QPushButton) -> None:
+        """Keep a secondary action button at its natural width.
+
+        Sizing to the text instead of a hard-coded pixel value keeps the row
+        readable at 125%/150% scaling, where the same width would clip the label.
+        """
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        button.setMinimumWidth(ACTION_BUTTON_MIN_WIDTH)
 
     def _install_shortcuts(self) -> None:
         """Bind the everyday actions to keyboard shortcuts."""
@@ -1438,17 +1468,17 @@ class MainWindow(QMainWindow):
         self.batch_button = QPushButton("批量转换")
         self.batch_button.setObjectName("SecondaryAction")
         self.batch_button.setToolTip("按当前设置依次转换队列中的全部视频（Ctrl+Shift+B）")
-        self.batch_button.setFixedWidth(ACTION_BUTTON_WIDTH)
+        self._pin_action_width(self.batch_button)
         self.batch_button.clicked.connect(self._start_batch_conversion)
 
         self.retry_button = QPushButton("重试失败项")
         self.retry_button.setObjectName("SecondaryAction")
         self.retry_button.setToolTip("只重新转换上一次失败的任务")
-        self.retry_button.setFixedWidth(ACTION_BUTTON_WIDTH)
+        self._pin_action_width(self.retry_button)
         self.retry_button.clicked.connect(self._retry_failed_tasks)
         self.retry_button.hide()
 
-        self.cancel_button.setFixedWidth(ACTION_BUTTON_WIDTH)
+        self._pin_action_width(self.cancel_button)
 
         bottom_actions = QHBoxLayout()
         bottom_actions.setSpacing(8)
@@ -2271,11 +2301,13 @@ class MainWindow(QMainWindow):
             self.resume_conversion_button.setToolTip("从开始重新执行转换")
         clearable = task.status in {TaskStatus.COMPLETED, TaskStatus.CANCELLED}
         self.clear_state_button.setVisible(clearable)
-        self.clear_state_button.setToolTip(
+        clear_tooltip = (
             "清除完成状态，输出文件会保留"
             if task.status == TaskStatus.COMPLETED
             else "删除当前取消状态"
         )
+        self.clear_state_button.setToolTip(clear_tooltip)
+        self.clear_state_button.setAccessibleName(clear_tooltip)
         self.open_file_button.setVisible(has_output)
         self.open_folder_button.setVisible(has_output)
 
@@ -2861,9 +2893,18 @@ class MainWindow(QMainWindow):
         task.conversion_progress = float(_progress_percent(progress.percent))
         task.conversion_speed = progress.speed
         task.conversion_eta_seconds = progress.eta_seconds
+        self._refresh_progress_ui(task)
+
+    def _refresh_progress_ui(self, task: MediaTask) -> None:
+        """Throttle progress repaints so a 50-file queue keeps scrolling smoothly."""
+        now = time.monotonic()
+        last = self._progress_ui_at.get(task.key, 0.0)
+        if (now - last) * 1000 < PROGRESS_UI_INTERVAL_MS:
+            return
+        self._progress_ui_at[task.key] = now
         self._update_task_item(task)
         self._refresh_footer_batch_progress(task.conversion_progress)
-        if self._current_task_key() == progress.task_key:
+        if self._current_task_key() == task.key:
             self._apply_conversion_to_preview(task)
 
     def _on_conversion_log(self, task_key: str, text: str) -> None:
@@ -3005,9 +3046,7 @@ class MainWindow(QMainWindow):
             elapsed_text = self._format_duration(record.elapsed_seconds)
             item = QListWidgetItem(
                 f"{record.output_format}  →  {record.output_path.name}\n"
-                f"{record.output_directory}\n"
-                f"{timestamp} · {record.status}{size_text}\n"
-                f"转换耗时 {elapsed_text}"
+                f"{timestamp} · {record.status}{size_text} · 耗时 {elapsed_text}"
             )
             item.setData(Qt.ItemDataRole.UserRole, record.record_id)
             item.setToolTip(
@@ -3427,6 +3466,35 @@ class MainWindow(QMainWindow):
         self._probe_pending_tasks()
         self._queue_thumbnails_for_ready_tasks()
         self._update_conversion_controls()
+        self._maybe_show_toolchain_guide(status)
+
+    def _maybe_show_toolchain_guide(self, status: ToolchainStatus) -> None:
+        """Explain the first-run setup once, without blocking the window."""
+        if status.ready or not self.isVisible():
+            return
+        if bool(self.settings.value("ui/ffmpeg_guide_shown", False)):
+            return
+        self.settings.setValue("ui/ffmpeg_guide_shown", True)
+
+        dialog = self._warning_dialog(
+            "需要配置 FFmpeg",
+            "没有找到 FFmpeg 和 ffprobe，视频信息读取和转换暂时不可用。",
+        )
+        dialog.setInformativeText(
+            "点击“打开设置”后选择 ffmpeg.exe 与 ffprobe.exe 的位置；"
+            "也可以把官方压缩包解压到应用目录，程序会自动识别。",
+        )
+        open_button = dialog.addButton("打开设置", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton("稍后再说", QMessageBox.ButtonRole.RejectRole)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+
+        def handle_click(button) -> None:
+            if button is open_button:
+                self._open_settings()
+            dialog.deleteLater()
+
+        dialog.buttonClicked.connect(handle_click)
+        dialog.show()
 
     def _set_status_state(self, state: str) -> None:
         self.status_dot.setProperty("state", state)
@@ -3515,6 +3583,7 @@ class MainWindow(QMainWindow):
         self.preview_title.refresh_elide()
         target = "浅色" if palette.name == "dark" else "深色"
         self.theme_button.setToolTip(f"切换为{target}主题")
+        self.theme_button.setAccessibleName(f"切换为{target}主题")
 
     def _apply_icon_theme(self, palette: ThemePalette) -> None:
         self.add_video_button.set_asset_icon(VIDEO_ICON_PATH, "#ffffff")

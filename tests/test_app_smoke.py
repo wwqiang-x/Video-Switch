@@ -372,8 +372,10 @@ def test_conversion_history_record_is_added(
     assert window.history_list.count() == 1
     item = window.history_list.item(0)
     assert "MKV" in item.text()
-    assert str(output.parent) in item.text()
-    assert "转换耗时" in item.text()
+    assert len(item.text().splitlines()) == 2
+    assert "耗时 00:02" in item.text()
+    # 输出目录改放在 tooltip 里，保持条目紧凑。
+    assert str(output.parent) in item.toolTip()
 
 
 def test_removing_task_can_delete_associated_history(

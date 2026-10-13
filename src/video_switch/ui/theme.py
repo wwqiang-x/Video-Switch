@@ -41,14 +41,14 @@ LIGHT_PALETTE = ThemePalette(
     border="#dce3eb",
     border_strong="#c7d2df",
     text="#172033",
-    muted="#66758a",
+    muted="#5f6d80",
     primary="#2563eb",
     primary_hover="#1d4ed8",
-    primary_soft="#e7efff",
+    primary_soft="#eef4ff",
     success="#15803d",
     success_soft="#eaf7ef",
     warning="#b45309",
-    danger="#dc2626",
+    danger="#d42020",
     danger_soft="#fff0f0",
     preview_bg="#111827",
     preview_text="#f8fafc",
@@ -69,7 +69,7 @@ DARK_PALETTE = ThemePalette(
     muted="#9aa8b8",
     primary="#4f8ef7",
     primary_hover="#6aa0fa",
-    primary_soft="#1d355e",
+    primary_soft="#152539",
     success="#4ade80",
     success_soft="#163324",
     warning="#fbbf24",
@@ -308,6 +308,7 @@ QFrame#PreviewStage {{
 
 QFrame#PreviewStage[dragActive="true"] {{
     border: 2px solid {palette.primary};
+    background: {palette.primary_soft};
 }}
 
 QFrame#SourcePathRow {{
@@ -518,7 +519,7 @@ QListWidget::item:selected {{
 }}
 
 QListWidget#HistoryList::item {{
-    min-height: 54px;
+    min-height: 44px;
     padding: 7px 8px;
 }}
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QSizePolicy
 
 from video_switch.formatting import format_duration, format_speed
 from video_switch.models.media_info import MediaInfo
@@ -10,7 +10,7 @@ from video_switch.models.media_task import TaskStatus
 from video_switch.services.history_store import ConversionHistoryStore
 from video_switch.ui.batch_dialogs import BatchConfirmDialog
 from video_switch.ui.format_help_dialog import FormatHelpDialog
-from video_switch.ui.main_window import ACTION_BUTTON_WIDTH, MainWindow
+from video_switch.ui.main_window import ACTION_BUTTON_MIN_WIDTH, MainWindow
 
 
 def _window(qtbot, tmp_path, isolated_settings, count: int = 2):
@@ -113,8 +113,10 @@ def test_action_buttons_keep_a_stable_width(qtbot, tmp_path, isolated_settings) 
     window, _tasks = _window(qtbot, tmp_path, isolated_settings)
 
     for button in (window.batch_button, window.retry_button, window.cancel_button):
-        assert button.minimumWidth() == ACTION_BUTTON_WIDTH
-        assert button.maximumWidth() == ACTION_BUTTON_WIDTH
+        # Fixed policy ties the width to the label, so showing or hiding the retry
+        # button no longer resizes its neighbours, at any scaling factor.
+        assert button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Fixed
+        assert button.minimumWidth() == ACTION_BUTTON_MIN_WIDTH
 
 
 def test_disabled_inputs_have_a_dedicated_style(qtbot, isolated_settings) -> None:
