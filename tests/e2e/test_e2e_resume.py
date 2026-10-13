@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QProcess
 
 from video_switch.models.conversion_settings import ConversionSettings
 from video_switch.models.media_info import MediaInfo
@@ -69,3 +70,7 @@ def test_cancelled_conversion_continues_from_its_segments(
     assert resumed_progress[0].percent > 30, "续转没有从已完成的进度开始"
     assert list(part_dir.glob("part_*")) == []
     assert task.conversion_resumable is False
+    # 每个分段都会创建一个 QProcess，跑完必须释放，否则长视频会一直堆积对象
+    qtbot.wait(50)
+    assert runner.findChildren(QProcess) == []
+    assert resumed.findChildren(QProcess) == []

@@ -13,6 +13,8 @@ from video_switch.services.qt_process import detach_process
 THUMBNAIL_WIDTH = 1920
 THUMBNAIL_TIMEOUT_MS = 20_000
 THUMBNAIL_CACHE_VERSION = "v3"
+THUMBNAIL_CACHE_MAX_FILES = 200
+THUMBNAIL_CACHE_MAX_BYTES = 128 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +143,32 @@ class ThumbnailService(QObject):
         (self.cache_dir / f"v2-{content_signature}.jpg").unlink(missing_ok=True)
         (self.cache_dir / f"{content_signature}.jpg").unlink(missing_ok=True)
 
+    def _prune_cache(self) -> None:
+        """Keep the cache bounded so it cannot grow without limit."""
+        entries: list[tuple[float, int, Path]] = []
+        total = 0
+        try:
+            candidates = [path for path in self.cache_dir.glob("*.jpg") if path.is_file()]
+        except OSError:  # pragma: no cover - defensive
+            return
+        for path in candidates:
+            try:
+                stat = path.stat()
+            except OSError:  # pragma: no cover - defensive
+                continue
+            entries.append((stat.st_mtime, stat.st_size, path))
+            total += stat.st_size
+        if len(entries) <= THUMBNAIL_CACHE_MAX_FILES and total <= THUMBNAIL_CACHE_MAX_BYTES:
+            return
+
+        entries.sort(key=lambda item: item[0])
+        while entries and (
+            len(entries) > THUMBNAIL_CACHE_MAX_FILES or total > THUMBNAIL_CACHE_MAX_BYTES
+        ):
+            _, size, path = entries.pop(0)
+            path.unlink(missing_ok=True)
+            total -= size
+
     def _start_next(self) -> None:
         if self._current is not None or not self._queue:
             return
@@ -206,6 +234,7 @@ class ThumbnailService(QObject):
 
         output_path = self._current.output_path
         if exit_code == 0 and output_path.is_file() and output_path.stat().st_size > 0:
+            self._prune_cache()
             self._finish(
                 ThumbnailResult(
                     task_key=self._current.task_key,

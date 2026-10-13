@@ -238,7 +238,7 @@ class ConversionRunner(QObject):
             self._process.waitForFinished(2000)
         self._remove_current_part()
         self._remove_output()
-        self._process = None
+        self._release_process()
 
     def _prepare_segmented_resume(
         self,
@@ -349,6 +349,7 @@ class ConversionRunner(QObject):
     def _start_process(self, args: list[str]) -> None:
         if self._ffmpeg_path is None:
             return
+        self._release_process()
         process = QProcess(self)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_stdout)
@@ -357,6 +358,18 @@ class ConversionRunner(QObject):
         process.errorOccurred.connect(self._on_error)
         self._process = process
         process.start(str(self._ffmpeg_path), args)
+
+    def _release_process(self) -> None:
+        """Let Qt destroy the QProcess of a finished step.
+
+        A long video is converted in 30-second segments, so without this the
+        runner would keep one QProcess object per segment alive for the whole
+        session (240 objects for a two-hour file).
+        """
+        process = self._process
+        self._process = None
+        if process is not None:
+            process.deleteLater()
 
     def _read_stdout(self) -> None:
         if self._process is None or self.sender() is not self._process:
@@ -566,7 +579,7 @@ class ConversionRunner(QObject):
                 )
             ),
         )
-        self._process = None
+        self._release_process()
         self._output_path = None
         self.finished.emit(result)
 

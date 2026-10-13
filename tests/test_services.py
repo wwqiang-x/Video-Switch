@@ -386,6 +386,46 @@ def test_thumbnail_service_deletes_old_cache_versions(tmp_path) -> None:
     assert not current.exists() and not legacy_v2.exists() and not legacy.exists()
 
 
+def test_thumbnail_service_prunes_the_cache(tmp_path, monkeypatch) -> None:
+    import video_switch.services.thumbnail as thumbnail_module
+
+    monkeypatch.setattr(thumbnail_module, "THUMBNAIL_CACHE_MAX_FILES", 3)
+    service = ThumbnailService(tmp_path / "cache")
+    for index in range(6):
+        path = service.cache_dir / f"v3-signature-{index}.jpg"
+        path.write_bytes(b"x" * 1024)
+        # 让修改时间明确递增，便于按“最旧优先”清理
+        import os
+
+        os.utime(path, (1_700_000_000 + index, 1_700_000_000 + index))
+
+    service._prune_cache()
+
+    remaining = sorted(path.name for path in service.cache_dir.glob("*.jpg"))
+    assert remaining == [
+        "v3-signature-3.jpg",
+        "v3-signature-4.jpg",
+        "v3-signature-5.jpg",
+    ]
+
+
+def test_thumbnail_service_prunes_by_size(tmp_path, monkeypatch) -> None:
+    import video_switch.services.thumbnail as thumbnail_module
+
+    monkeypatch.setattr(thumbnail_module, "THUMBNAIL_CACHE_MAX_BYTES", 2048)
+    service = ThumbnailService(tmp_path / "cache")
+    for index in range(4):
+        path = service.cache_dir / f"v3-big-{index}.jpg"
+        path.write_bytes(b"x" * 1024)
+        import os
+
+        os.utime(path, (1_700_000_000 + index, 1_700_000_000 + index))
+
+    service._prune_cache()
+
+    assert len(list(service.cache_dir.glob("*.jpg"))) == 2
+
+
 # ----------------------------------------------------------------------- toolchain
 
 
@@ -679,6 +719,22 @@ def test_runner_shutdown_and_process_error(qtbot, tmp_path, monkeypatch) -> None
     runner._on_error(QProcess.ProcessError.FailedToStart)
     assert "无法启动 FFmpeg" in (results[-1].error or "")
     assert results[-1].can_resume is True
+
+
+def test_runner_releases_finished_process_objects(qtbot, tmp_path, monkeypatch) -> None:
+    """A long video creates one QProcess per segment; they must not pile up."""
+    _record_process_launches(monkeypatch)
+    task = _task(tmp_path, duration=SEGMENT_DURATION_SECONDS * 2)
+    runner = ConversionRunner()
+    runner.start(task, ConversionSettings(), tmp_path / "out", FFMPEG_STUB)
+    runner._process = QProcess(runner)
+    assert len(runner.findChildren(QProcess)) == 1
+
+    runner._release_process()
+
+    assert runner._process is None
+    qtbot.wait(50)
+    assert runner.findChildren(QProcess) == []
 
 
 def test_runner_parses_stdout_progress_lines(qtbot, tmp_path, monkeypatch) -> None:
