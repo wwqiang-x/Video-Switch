@@ -20,6 +20,8 @@ __pycache__/
 build/
 dist/
 *.spec
+# 打包配置本身需要入库（上面的 *.spec 只用于忽略临时生成的 spec）
+!packaging/VideoSwitch.spec
 
 # Local outputs and logs
 converted/

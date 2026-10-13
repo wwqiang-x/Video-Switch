@@ -101,6 +101,17 @@
 从 Releases 下载 `VideoSwitch-<版本>-win64.zip`，解压到任意目录后双击 `VideoSwitch.exe`。
 压缩包已内置 ffmpeg 与 ffprobe，不需要安装 Python 或 FFmpeg。
 
+### 打包（开发者）
+
+```powershell
+# 需要先准备 .tools/ffmpeg/bin 下的 ffmpeg.exe 与 ffprobe.exe
+uv run python packaging/build_windows.py
+```
+
+脚本会生成图标、调用 PyInstaller、把 FFmpeg 与许可证一起放进
+`dist/VideoSwitch/`，并打包出 `dist/VideoSwitch-<版本>-win64.zip`。
+当前产物：目录 247 MB，压缩包 90 MB。
+
 ### 方式二：从源码运行
 
 1. Windows 10 / 11。
@@ -252,6 +263,7 @@ video-switch/
 │   └── test_*.py                   # 单元与界面测试
 ├── docs/                           # 会话总结、决策记录、FFmpeg 说明、性能与测试报告
 ├── icon/                           # 原始矢量图标素材
+├── packaging/                      # PyInstaller 配置、打包脚本、生成的 exe 图标
 ├── pyproject.toml                  # 项目配置、依赖与工具设置
 └── uv.lock                         # 可复现依赖锁
 ```
