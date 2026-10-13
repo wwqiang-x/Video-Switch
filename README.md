@@ -213,9 +213,7 @@ task = MediaTask(
 app = QCoreApplication([])
 runner = ConversionRunner()
 runner.progress.connect(lambda item: print(f"{item.percent:.1f}%"))
-runner.finished.connect(
-    lambda result: (print(result.success, result.output_path), app.quit())
-)
+runner.finished.connect(lambda result: (print(result.success, result.output_path), app.quit()))
 runner.start(task, ConversionSettings(), Path("out"), Path("ffmpeg"))
 app.exec()
 ```
