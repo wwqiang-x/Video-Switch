@@ -336,6 +336,17 @@ QProgressBar::chunk {{
     border-radius: 4px;
 }}
 
+QProgressBar#FooterProgress {{
+    border: none;
+    border-radius: 3px;
+    min-height: 6px;
+    max-height: 6px;
+}}
+
+QProgressBar#FooterProgress::chunk {{
+    border-radius: 3px;
+}}
+
 QPushButton#PrimaryAction {{
     background: {palette.primary};
     border: 1px solid {palette.primary};

@@ -79,7 +79,7 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     assert window.settings_button.icon().isNull() is False
     assert window.browse_button.icon().isNull() is False
     assert window.reset_output_button.icon().isNull() is False
-    assert window._task_icon().isNull() is False
+    assert window._task_icon(TaskStatus.METADATA_READY).isNull() is False
     assert window.windowIcon().isNull() is False
     assert window.format_buttons["MP4"].isChecked()
     assert window.task_stack.currentIndex() == 0

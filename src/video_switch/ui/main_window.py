@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import (
+    QByteArray,
     QEvent,
     QPointF,
     QRect,
@@ -29,14 +30,17 @@ from PySide6.QtGui import (
     QFontMetrics,
     QGuiApplication,
     QIcon,
+    QKeySequence,
     QPainter,
     QPalette,
     QPixmap,
+    QShortcut,
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractSpinBox,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -60,6 +64,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyleOptionButton,
+    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -111,6 +116,15 @@ from video_switch.ui.batch_dialogs import (
 from video_switch.ui.fonts import register_cjk_fonts
 from video_switch.ui.format_help_dialog import FormatHelpDialog
 from video_switch.ui.settings_dialog import SettingsDialog
+from video_switch.ui.task_item_delegate import (
+    ACCENT_ROLE,
+    META_ROLE,
+    NAME_ROLE,
+    STATUS_COLOR_ROLE,
+    STATUS_ROLE,
+    TaskItemDelegate,
+    status_color,
+)
 from video_switch.ui.theme import ThemePalette, build_stylesheet, get_palette
 
 APP_NAME = "Video Switch"
@@ -767,14 +781,49 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
         self.setMinimumSize(1080, 680)
         self.setAcceptDrops(True)
+        self._restore_window_geometry()
 
         self._build_interface()
         self._refresh_history_list()
         self._install_wheel_guards()
         self._load_conversion_settings()
         self._apply_theme()
+        self._install_shortcuts()
         QTimer.singleShot(0, self._restore_saved_tasks)
         QTimer.singleShot(0, self._detect_toolchain)
+
+    def _restore_window_geometry(self) -> None:
+        """Reuse the size, position and maximised state from the last session."""
+        geometry = self.settings.value("ui/window_geometry")
+        if isinstance(geometry, QByteArray) and not geometry.isEmpty():
+            self.restoreGeometry(geometry)
+
+    def _save_window_geometry(self) -> None:
+        self.settings.setValue("ui/window_geometry", self.saveGeometry())
+
+    def _install_shortcuts(self) -> None:
+        """Bind the everyday actions to keyboard shortcuts."""
+        bindings = (
+            ("Ctrl+O", self._choose_videos),
+            ("Ctrl+Return", self._start_conversion),
+            ("Ctrl+Enter", self._start_conversion),
+            ("Ctrl+Shift+B", self._start_batch_conversion),
+            ("Esc", self._cancel_conversion),
+            ("Delete", self._delete_focused_task),
+        )
+        self.shortcuts: list[QShortcut] = []
+        for sequence, handler in bindings:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(handler)
+            self.shortcuts.append(shortcut)
+
+    def _delete_focused_task(self) -> None:
+        """Remove the selected task unless the user is typing in a field."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QComboBox)):
+            return
+        self._remove_selected_task()
 
     def _build_interface(self) -> None:
         root = QWidget()
@@ -842,6 +891,7 @@ class MainWindow(QMainWindow):
 
         self.add_video_button = AddVideoButton("添加视频")
         self.add_video_button.setObjectName("PrimaryAction")
+        self.add_video_button.setToolTip("添加视频文件（Ctrl+O）")
         self.add_video_button.clicked.connect(self._choose_videos)
 
         self.clear_button = AssetIconButton(
@@ -897,6 +947,8 @@ class MainWindow(QMainWindow):
         self.task_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.task_list.currentItemChanged.connect(self._on_task_selected)
+        self.task_delegate = TaskItemDelegate(get_palette(self.theme_name), self)
+        self.task_list.setItemDelegate(self.task_delegate)
         self.task_stack = QStackedWidget()
         self.task_stack.addWidget(self._build_empty_queue())
         self.task_stack.addWidget(self.task_list)
@@ -904,6 +956,7 @@ class MainWindow(QMainWindow):
 
         self.remove_button = QPushButton("移除选中")
         self.remove_button.setObjectName("SecondaryAction")
+        self.remove_button.setToolTip("移除选中的任务（Delete）")
         self.remove_button.setEnabled(False)
         self.remove_button.clicked.connect(self._remove_selected_task)
 
@@ -1376,12 +1429,13 @@ class MainWindow(QMainWindow):
 
         self.cancel_button = QPushButton("取消转换")
         self.cancel_button.setObjectName("SecondaryAction")
+        self.cancel_button.setToolTip("取消当前转换（Esc）")
         self.cancel_button.hide()
         self.cancel_button.clicked.connect(self._cancel_conversion)
 
         self.batch_button = QPushButton("批量转换")
         self.batch_button.setObjectName("SecondaryAction")
-        self.batch_button.setToolTip("按当前设置依次转换队列中的全部视频")
+        self.batch_button.setToolTip("按当前设置依次转换队列中的全部视频（Ctrl+Shift+B）")
         self.batch_button.clicked.connect(self._start_batch_conversion)
 
         self.retry_button = QPushButton("重试失败项")
@@ -1759,12 +1813,26 @@ class MainWindow(QMainWindow):
         self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
         self.footer_status_label.setProperty("muted", True)
 
-        stage_label = QLabel("开发阶段 · 步骤 9")
+        self.batch_status_label = QLabel("")
+        self.batch_status_label.setProperty("muted", True)
+        self.batch_status_label.hide()
+
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setObjectName("FooterProgress")
+        self.batch_progress_bar.setRange(0, 100)
+        self.batch_progress_bar.setValue(0)
+        self.batch_progress_bar.setTextVisible(False)
+        self.batch_progress_bar.setFixedSize(120, 6)
+        self.batch_progress_bar.hide()
+
+        stage_label = QLabel("开发阶段 · 步骤 10")
         stage_label.setProperty("muted", True)
 
         layout.addWidget(self.status_dot)
         layout.addWidget(self.footer_status_label)
         layout.addStretch(1)
+        layout.addWidget(self.batch_status_label)
+        layout.addWidget(self.batch_progress_bar)
         layout.addWidget(stage_label)
         return footer
 
@@ -1876,24 +1944,22 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _create_task_item(self, task: MediaTask) -> QListWidgetItem:
-        item = QListWidgetItem(
-            f"{task.display_name}\n"
-            f"{task.extension}  ·  {format_file_size(task.size_bytes)}  ·  {task.status_text}"
-        )
+        item = QListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, task.key)
         item.setToolTip(str(task.path))
         item.setSizeHint(QSize(0, 62))
-        item.setIcon(self._task_icon())
+        item.setIcon(self._task_icon(task.status))
         self.task_list.addItem(item)
         self.task_items[task.key] = item
+        self._update_task_item(task)
         return item
 
-    def _task_icon(self) -> QIcon:
+    def _task_icon(self, status: TaskStatus) -> QIcon:
         palette = get_palette(self.theme_name)
         return QIcon(
             _tinted_svg_pixmap(
                 FILE_ICON_PATH,
-                palette.primary,
+                status_color(status, palette),
                 24,
                 widget=self,
             )
@@ -2247,7 +2313,7 @@ class MainWindow(QMainWindow):
         elif running:
             self.start_button.setToolTip("当前已有转换任务正在执行")
         else:
-            self.start_button.setToolTip("使用当前设置转换所选视频")
+            self.start_button.setToolTip("使用当前设置转换所选视频（Ctrl+Enter）")
 
         self.cancel_button.setVisible(running)
         self.cancel_button.setEnabled(running)
@@ -2545,9 +2611,29 @@ class MainWindow(QMainWindow):
         if not self.batch_running:
             self.batch_progress_label.setText("")
             self.batch_progress_label.hide()
+            self.batch_status_label.hide()
+            self.batch_progress_bar.hide()
             return
         self.batch_progress_label.setText(f"批量 {self.batch_index}/{self.batch_total}")
         self.batch_progress_label.show()
+        self._refresh_footer_batch_progress()
+        self.batch_status_label.show()
+        self.batch_progress_bar.show()
+
+    def _refresh_footer_batch_progress(self, current_percent: float | None = None) -> None:
+        """Show overall batch progress in the footer while a batch is running."""
+        if not self.batch_running:
+            return
+        finished = max(0, self.batch_index - 1)
+        if current_percent is None:
+            task_key = self._current_task_key()
+            task = self.tasks.get(task_key) if task_key else None
+            current_percent = task.conversion_progress if task is not None else 0.0
+        overall = (finished + min(100.0, max(0.0, current_percent)) / 100) / self.batch_total
+        self.batch_status_label.setText(
+            f"批量 {self.batch_index}/{self.batch_total} · 当前 {current_percent:.0f}%",
+        )
+        self.batch_progress_bar.setValue(round(overall * 100))
 
     def _abort_batch(self) -> None:
         """Drop batch bookkeeping, for example when the queue is cleared."""
@@ -2770,6 +2856,7 @@ class MainWindow(QMainWindow):
         task.conversion_speed = progress.speed
         task.conversion_eta_seconds = progress.eta_seconds
         self._update_task_item(task)
+        self._refresh_footer_batch_progress(task.conversion_progress)
         if self._current_task_key() == progress.task_key:
             self._apply_conversion_to_preview(task)
 
@@ -3082,10 +3169,20 @@ class MainWindow(QMainWindow):
         status_text = task.status_text
         if task.status == TaskStatus.CONVERTING:
             status_text = f"转换中 {task.conversion_progress:.0f}%"
-        item.setText(
-            f"{task.display_name}\n"
-            f"{task.extension}  ·  {format_file_size(task.size_bytes)}  ·  {status_text}"
+        palette = get_palette(self.theme_name)
+        item.setText(f"{task.display_name}\n{status_text}")
+        item.setData(NAME_ROLE, task.display_name)
+        item.setData(
+            META_ROLE,
+            f"{task.extension}  ·  {format_file_size(task.size_bytes)}",
         )
+        item.setData(STATUS_ROLE, status_text)
+        item.setData(STATUS_COLOR_ROLE, status_color(task.status, palette))
+        item.setData(
+            ACCENT_ROLE,
+            palette.danger if task.status == TaskStatus.FAILED else "",
+        )
+        item.setIcon(self._task_icon(task.status))
         tooltip = str(task.path)
         if task.probe_error:
             tooltip = f"{tooltip}\n{task.probe_error}"
@@ -3362,6 +3459,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self.conversion_runner.shutdown()
+        self._save_window_geometry()
         event.accept()
         super().closeEvent(event)
 
@@ -3453,6 +3551,9 @@ class MainWindow(QMainWindow):
             palette.text,
         )
         self.regenerate_thumbnail_button.set_hover_color(palette.help_hover)
-        task_icon = self._task_icon()
+        self.task_delegate.set_theme(palette)
         for index in range(self.task_list.count()):
-            self.task_list.item(index).setIcon(task_icon)
+            item = self.task_list.item(index)
+            task = self.tasks.get(str(item.data(Qt.ItemDataRole.UserRole)))
+            if task is not None:
+                self._update_task_item(task)
