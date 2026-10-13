@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QLineEdit
+from PySide6.QtWidgets import QLineEdit, QStyleOptionViewItem
 
 from video_switch.models.media_info import MediaInfo
 from video_switch.models.media_task import TaskStatus
@@ -16,6 +16,7 @@ from video_switch.ui.task_item_delegate import (
     NAME_ROLE,
     STATUS_COLOR_ROLE,
     STATUS_ROLE,
+    TaskItemDelegate,
     status_color,
 )
 from video_switch.ui.theme import get_palette
@@ -180,3 +181,24 @@ def test_window_geometry_is_remembered(qtbot, isolated_settings) -> None:
     qtbot.addWidget(second)
 
     assert (second.width(), second.height()) == (1180, 760)
+
+
+def test_delegate_leaves_only_the_background_to_the_style(
+    qtbot,
+    tmp_path,
+    isolated_settings,
+) -> None:
+    """Text and icon must be cleared, or the style paints a second overlapping icon."""
+    window, tasks = _window_with_tasks(qtbot, tmp_path, isolated_settings, count=1)
+    window.show()
+    qtbot.waitExposed(window)
+    item = window.task_items[tasks[0].key]
+    index = window.task_list.indexFromItem(item)
+    option = QStyleOptionViewItem()
+    option.rect = window.task_list.visualItemRect(item)
+    delegate: TaskItemDelegate = window.task_list.itemDelegate()
+
+    prepared = delegate._background_option(option, index)
+
+    assert prepared.text == ""
+    assert prepared.icon.isNull() is True

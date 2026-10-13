@@ -62,9 +62,7 @@ class TaskItemDelegate(QStyledItemDelegate):
         option: QStyleOptionViewItem,
         index,
     ) -> None:
-        view_option = QStyleOptionViewItem(option)
-        self.initStyleOption(view_option, index)
-        view_option.text = ""
+        view_option = self._background_option(option, index)
         style = view_option.widget.style() if view_option.widget else QApplication.style()
         style.drawControl(
             QStyle.ControlElement.CE_ItemViewItem,
@@ -129,3 +127,19 @@ class TaskItemDelegate(QStyledItemDelegate):
                 metrics.elidedText(status, Qt.TextElideMode.ElideRight, status_rect.width()),
             )
         painter.restore()
+
+    def _background_option(
+        self,
+        option: QStyleOptionViewItem,
+        index,
+    ) -> QStyleOptionViewItem:
+        """Return an option that only carries the row background for the style.
+
+        Text and icon must be cleared, otherwise the style paints its own copy
+        and the glyph is drawn twice, which looks like a doubled icon.
+        """
+        view_option = QStyleOptionViewItem(option)
+        self.initStyleOption(view_option, index)
+        view_option.text = ""
+        view_option.icon = QIcon()
+        return view_option
