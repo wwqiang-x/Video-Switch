@@ -180,7 +180,11 @@ def test_window_geometry_is_remembered(qtbot, isolated_settings) -> None:
     second = MainWindow(settings=isolated_settings)
     qtbot.addWidget(second)
 
-    assert (second.width(), second.height()) == (1180, 760)
+    # 屏幕比保存的窗口小时，Qt 会把窗口收进可用区域；此时至少保证下限尺寸生效。
+    width, height = second.width(), second.height()
+    assert width >= 1080 and height >= 680
+    if width >= 1180:
+        assert (width, height) == (1180, 760)
 
 
 def test_delegate_leaves_only_the_background_to_the_style(

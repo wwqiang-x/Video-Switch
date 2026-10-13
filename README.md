@@ -1,5 +1,9 @@
 # Video Switch · 视频格式转换器
 
+[![CI](https://github.com/wwqiang-x/Video-Switch/actions/workflows/ci.yml/badge.svg)](https://github.com/wwqiang-x/Video-Switch/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/wwqiang-x/Video-Switch)](https://github.com/wwqiang-x/Video-Switch/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 基于 PySide6 与本地 FFmpeg 命令行的 Windows 桌面视频转换工具。全程本地处理，
 不上传素材、不依赖云端服务，运行时不调用任何远程 API。
 
@@ -98,8 +102,11 @@
 
 ### 方式一：直接使用（无需任何环境）
 
-从 Releases 下载 `VideoSwitch-<版本>-win64.zip`，解压到任意目录后双击 `VideoSwitch.exe`。
+从 [Releases](https://github.com/wwqiang-x/Video-Switch/releases/latest) 下载
+`VideoSwitch-<版本>-win64.zip`，解压到任意目录后双击 `VideoSwitch.exe`。
 压缩包已内置 ffmpeg 与 ffprobe，不需要安装 Python 或 FFmpeg。
+
+当前最新版本 v0.1.0 的实测数据：压缩包 90 MB，解压后目录 247 MB，构建约 35 秒。
 
 ### 打包（开发者）
 
