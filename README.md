@@ -133,7 +133,7 @@ uv run python packaging/build_windows.py
 
 ```powershell
 # 1. 获取源码
-git clone https://github.com/<你的用户名>/video-switch.git
+git clone https://github.com/wwqiang-x/Video-Switch.git
 cd video-switch
 
 # 2. 安装依赖（自动创建虚拟环境）
