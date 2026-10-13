@@ -203,6 +203,10 @@ class ConversionRunner(QObject):
         self._part_paths = []
         self._current_part = None
         self._concat_list = None
+        # A previous segmented run leaves its finished duration behind; without
+        # this reset a following single-process run starts out at ~100%.
+        self._completed_duration = 0.0
+        self._segment_limit = 0.0
 
         self.started.emit(task.key, output_path)
         if (

@@ -1,7 +1,13 @@
 """Tests for FFmpeg conversion progress parsing."""
 
+from datetime import datetime
+from pathlib import Path
+
 from PySide6.QtCore import QProcess
 
+from video_switch.models.conversion_settings import ConversionSettings
+from video_switch.models.media_info import MediaInfo
+from video_switch.models.media_task import MediaTask
 from video_switch.services.conversion_runner import (
     CANCEL_KILL_TIMEOUT_MS,
     ConversionRunner,
@@ -9,6 +15,8 @@ from video_switch.services.conversion_runner import (
     parse_ffmpeg_time,
     parse_microseconds,
 )
+
+FFMPEG_STUB = Path("ffmpeg.exe")
 
 
 def test_parse_ffmpeg_time() -> None:
@@ -92,3 +100,45 @@ def test_cancel_uses_a_short_kill_fallback(qtbot) -> None:
     assert runner._kill_timer.isActive()
     assert runner._kill_timer.interval() == CANCEL_KILL_TIMEOUT_MS
     assert CANCEL_KILL_TIMEOUT_MS <= 500
+
+
+def test_single_run_forgets_the_previous_segmented_progress(
+    qtbot,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """MP3 (segmented) followed by GIF (single) used to jump straight to 100%."""
+    del qtbot
+    monkeypatch.setattr(ConversionRunner, "_start_single", lambda self, path: None)
+    task = MediaTask(
+        path=tmp_path / "clip.mp4",
+        size_bytes=1024,
+        content_signature="signature",
+        imported_at=datetime.now(),
+        media_info=MediaInfo(duration_seconds=750.0, width=1920, height=1080),
+    )
+    runner = ConversionRunner()
+    runner._completed_duration = 750.0  # left behind by the finished MP3 run
+    runner._segment_limit = 30.0
+    captured: list = []
+    runner.progress.connect(captured.append)
+
+    runner.start(
+        task,
+        ConversionSettings(output_format="GIF", video_codec="GIF", audio_codec=""),
+        tmp_path,
+        FFMPEG_STUB,
+    )
+
+    assert runner._completed_duration == 0.0
+    assert runner._segment_limit == 0.0
+
+    runner._progress_data = {
+        "progress": "continue",
+        "out_time_us": "5000000",
+        "speed": "20x",
+    }
+    runner._emit_segment_progress()
+
+    assert captured, "进度信号没有发出"
+    assert captured[-1].percent < 5
