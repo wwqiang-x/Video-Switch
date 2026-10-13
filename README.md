@@ -90,6 +90,14 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
+查看测试覆盖率（当前总体 88%，服务层 91%）：
+
+```powershell
+uv run pytest --cov=video_switch --cov-report=term-missing
+```
+
+详细数据与说明见 [性能与测试报告](docs/性能与测试报告.md)。
+
 ## 项目结构
 
 ```text
@@ -118,7 +126,7 @@ video-switch/
 - [x] 步骤 8：批量任务队列
 - [x] 步骤 9：异常处理与恢复
 - [x] 步骤 10：界面优化
-- [ ] 步骤 11：自动测试与性能优化
+- [ ] 步骤 11：自动测试与性能优化（第 1 项已完成：覆盖率基线 88%，服务层 91%）
 - [ ] 步骤 12：打包与 GitHub 发布
 - [ ] 步骤 13：面试演示材料
 
@@ -127,6 +135,7 @@ video-switch/
 - [会话总结](docs/会话总结.md)
 - [开发决策记录](docs/开发决策记录.md)
 - [FFmpeg 入门说明](docs/FFmpeg说明.md)
+- [性能与测试报告](docs/性能与测试报告.md)
 
 ## API 说明
 

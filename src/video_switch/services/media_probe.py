@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
 from video_switch.models.media_info import MediaInfo
 from video_switch.models.media_task import MediaTask
+from video_switch.services.qt_process import detach_process
 
 PROBE_TIMEOUT_MS = 30_000
 CONTAINER_NAMES = {
@@ -266,11 +267,7 @@ class MediaProbeService(QObject):
         process = self._process
         self._process = None
         if process is not None:
-            try:
-                process.finished.disconnect()
-                process.errorOccurred.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            detach_process(process)
             if process.state() != QProcess.ProcessState.NotRunning:
                 process.kill()
         self._finish(
@@ -296,10 +293,6 @@ class MediaProbeService(QObject):
         self._current = None
         if process is None:
             return
-        try:
-            process.finished.disconnect()
-            process.errorOccurred.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        detach_process(process)
         if process.state() != QProcess.ProcessState.NotRunning:
             process.kill()

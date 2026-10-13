@@ -20,6 +20,18 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["src/video_switch"]
+omit = ["src/video_switch/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
+
 [tool.ruff]
 extend-exclude = [".uv-cache"]
 line-length = 100
@@ -32,6 +44,7 @@ select = ["B", "E", "F", "I", "UP"]
 dev = [
     "pyinstaller>=6.22.3",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "pytest-qt>=4.5.0",
     "ruff>=0.17.0",
 ]

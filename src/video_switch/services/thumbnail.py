@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QProcess, QStandardPaths, QTimer, Signal
 
 from video_switch.models.media_task import MediaTask
+from video_switch.services.qt_process import detach_process
 
 THUMBNAIL_WIDTH = 1920
 THUMBNAIL_TIMEOUT_MS = 20_000
@@ -260,9 +261,5 @@ class ThumbnailService(QObject):
         self._process = None
         if process is None:
             return None
-        try:
-            process.finished.disconnect()
-            process.errorOccurred.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        detach_process(process)
         return process
