@@ -70,6 +70,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from video_switch.formatting import format_duration, format_speed
 from video_switch.models.conversion_history import ConversionHistoryRecord
 from video_switch.models.conversion_settings import (
     AUDIO_CODEC_OPTIONS,
@@ -152,6 +153,7 @@ AUDIO_BITRATE_OPTIONS = ("128 kbps", "192 kbps", "256 kbps", "320 kbps")
 NOT_APPLICABLE = "不适用"
 MESSAGE_ICON_SIZE = 44
 RESUME_DIRS_KEY = "conversion/resume_dirs"
+ACTION_BUTTON_WIDTH = 104
 
 
 def _progress_percent(value: float) -> int:
@@ -1012,7 +1014,7 @@ class MainWindow(QMainWindow):
         heading = QHBoxLayout()
         title = QLabel("视频信息")
         title.setObjectName("PanelTitle")
-        self.media_status = QLabel("未选择")
+        self.media_status = QLabel("尚未选择")
         self.media_status.setObjectName("StatusChip")
         self.regenerate_thumbnail_button = AssetIconButton(
             "AssetIconButton",
@@ -1436,13 +1438,17 @@ class MainWindow(QMainWindow):
         self.batch_button = QPushButton("批量转换")
         self.batch_button.setObjectName("SecondaryAction")
         self.batch_button.setToolTip("按当前设置依次转换队列中的全部视频（Ctrl+Shift+B）")
+        self.batch_button.setFixedWidth(ACTION_BUTTON_WIDTH)
         self.batch_button.clicked.connect(self._start_batch_conversion)
 
         self.retry_button = QPushButton("重试失败项")
         self.retry_button.setObjectName("SecondaryAction")
         self.retry_button.setToolTip("只重新转换上一次失败的任务")
+        self.retry_button.setFixedWidth(ACTION_BUTTON_WIDTH)
         self.retry_button.clicked.connect(self._retry_failed_tasks)
         self.retry_button.hide()
+
+        self.cancel_button.setFixedWidth(ACTION_BUTTON_WIDTH)
 
         bottom_actions = QHBoxLayout()
         bottom_actions.setSpacing(8)
@@ -1810,7 +1816,7 @@ class MainWindow(QMainWindow):
         self.status_dot.setProperty("state", "pending")
         self.status_dot.setFixedSize(8, 8)
 
-        self.footer_status_label = QLabel("正在检测 FFmpeg 环境...")
+        self.footer_status_label = QLabel("正在检测 FFmpeg 环境…")
         self.footer_status_label.setProperty("muted", True)
 
         self.batch_status_label = QLabel("")
@@ -1940,7 +1946,7 @@ class MainWindow(QMainWindow):
         dialog.setDetailedText(
             "\n".join(f"{issue.path.name or issue.path}：{issue.reason}" for issue in result.issues)
         )
-        dialog.addButton("知道了", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton("关闭", QMessageBox.ButtonRole.AcceptRole)
         dialog.exec()
 
     def _create_task_item(self, task: MediaTask) -> QListWidgetItem:
@@ -2035,7 +2041,7 @@ class MainWindow(QMainWindow):
 
         if task.status == TaskStatus.PROBING_METADATA:
             self.media_status.setText("读取中")
-            self.preview_hint.setText("正在读取视频信息...")
+            self.preview_hint.setText("正在读取视频信息…")
         elif task.status == TaskStatus.METADATA_READY:
             self.media_status.setText("信息已读取")
             self.preview_hint.setText("等待生成缩略图")
@@ -2092,12 +2098,12 @@ class MainWindow(QMainWindow):
         self.thumbnail_label.hide()
         self.preview_icon.show()
         if task.thumbnail_generating:
-            self.preview_hint.setText("正在生成缩略图...")
+            self.preview_hint.setText("正在生成缩略图…")
         elif task.thumbnail_error:
             self.preview_hint.setText(f"缩略图生成失败：{task.thumbnail_error}")
 
     def _clear_preview(self) -> None:
-        self.media_status.setText("未选择")
+        self.media_status.setText("尚未选择")
         self.metric_duration.value_label.setText("--")
         self.metric_resolution.value_label.setText("--")
         self.metric_frame_rate.value_label.setText("--")
@@ -2224,7 +2230,7 @@ class MainWindow(QMainWindow):
         if task.status == TaskStatus.CONVERTING:
             details: list[str] = []
             if task.conversion_speed:
-                details.append(task.conversion_speed)
+                details.append(format_speed(task.conversion_speed))
             if task.conversion_eta_seconds is not None:
                 details.append(f"剩余 {self._format_duration(task.conversion_eta_seconds)}")
             self.conversion_status_label.setText("正在转换")
@@ -2936,9 +2942,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
-        total_seconds = max(0, round(seconds))
-        minutes, remaining_seconds = divmod(total_seconds, 60)
-        return f"{minutes:02d}:{remaining_seconds:02d}"
+        return format_duration(seconds)
 
     def _record_conversion_history(self, result: ConversionResult) -> None:
         if result.cancelled:
@@ -3262,7 +3266,7 @@ class MainWindow(QMainWindow):
         else:
             dialog = self._warning_dialog(
                 "清空任务",
-                f"确定要移除队列中的 {len(self.tasks)} 个任务吗？",
+                f"确定清空队列中的 {len(self.tasks)} 个任务吗？",
             )
             clear_button = dialog.addButton(
                 "清空",
@@ -3399,7 +3403,7 @@ class MainWindow(QMainWindow):
 
     def _on_toolchain_detection_started(self) -> None:
         self._set_status_state("pending")
-        self.footer_status_label.setText("正在检测 FFmpeg 环境...")
+        self.footer_status_label.setText("正在检测 FFmpeg 环境…")
         self.footer_status_label.setToolTip("")
 
     def _on_toolchain_detected(self, status: ToolchainStatus) -> None:

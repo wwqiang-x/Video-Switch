@@ -472,6 +472,23 @@ QLineEdit:read-only {{
     color: {palette.muted};
 }}
 
+QLineEdit:disabled,
+QComboBox:disabled,
+QSpinBox:disabled,
+QPlainTextEdit:disabled {{
+    background: {palette.surface};
+    border-color: {palette.border};
+    color: {palette.muted};
+}}
+
+QComboBox:disabled::drop-down {{
+    border: none;
+}}
+
+QCheckBox:disabled {{
+    color: {palette.muted};
+}}
+
 QComboBox::drop-down {{
     border: none;
     width: 24px;

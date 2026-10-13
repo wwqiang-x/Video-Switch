@@ -204,7 +204,7 @@ class BatchConfirmDialog(QDialog):
         self.start_button = QPushButton("开始转换")
         self.start_button.setObjectName("PrimaryAction")
         self.start_button.clicked.connect(self.accept)
-        back_button = QPushButton("返回重选")
+        back_button = QPushButton("上一步")
         back_button.setObjectName("SecondaryAction")
         back_button.clicked.connect(self.reject)
         action_row = QHBoxLayout()

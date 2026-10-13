@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from video_switch.formatting import format_duration
+
 
 @dataclass(frozen=True, slots=True)
 class MediaInfo:
@@ -21,14 +23,7 @@ class MediaInfo:
 
     @property
     def duration_text(self) -> str:
-        if self.duration_seconds is None:
-            return "--"
-        total_seconds = max(0, int(self.duration_seconds))
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        if hours:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes:02d}:{seconds:02d}"
+        return format_duration(self.duration_seconds)
 
     @property
     def resolution_text(self) -> str:

@@ -50,6 +50,19 @@ def _record_starts(window) -> list[str]:
     return started
 
 
+def _record_footer(window) -> list[str]:
+    """Collect footer messages; a later toolchain update may overwrite the label."""
+    messages: list[str] = []
+    original = window._show_footer_message
+
+    def record(message: str, details: str = "", state=None, timeout: int = 0) -> None:
+        messages.append(message)
+        original(message, details, state, timeout)
+
+    window._show_footer_message = record
+    return messages
+
+
 def _auto_confirm_dialogs(window) -> None:
     """Skip the interactive batch dialogs: select every readable task and confirm."""
 
@@ -86,6 +99,7 @@ def test_batch_conversion_runs_every_task_in_order(
     window, tasks = _window_with_tasks(qtbot, tmp_path, isolated_settings)
     started = _record_starts(window)
     _auto_confirm_dialogs(window)
+    footers = _record_footer(window)
 
     window._start_batch_conversion()
 
@@ -119,10 +133,9 @@ def test_batch_conversion_runs_every_task_in_order(
     assert window.start_button.isVisibleTo(window) is True
     assert window.start_button.isEnabled() is True
     assert window.batch_button.isVisibleTo(window) is True
-    footer = window.footer_status_label.text()
-    assert "批量转换完成" in footer
-    assert "成功 2" in footer
-    assert "失败 1" in footer
+    summary = next(message for message in footers if "批量转换完成" in message)
+    assert "成功 2" in summary
+    assert "失败 1" in summary
 
 
 def test_batch_conversion_skips_unreadable_tasks(

@@ -71,7 +71,7 @@ class HelpCardDialog(QDialog):
         content_layout.addStretch(1)
         scroll.setWidget(content)
 
-        close_button = QPushButton("知道了")
+        close_button = QPushButton("关闭")
         close_button.setObjectName("PrimaryAction")
         close_button.clicked.connect(self.accept)
         action_row = QHBoxLayout()

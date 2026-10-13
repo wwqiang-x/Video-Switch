@@ -116,7 +116,7 @@ class SettingsDialog(QDialog):
 
         choose_button = QToolButton()
         choose_button.setObjectName("IconButton")
-        choose_button.setText("...")
+        choose_button.setText("…")
         choose_button.setToolTip(f"选择 {tool_name}.exe")
         choose_button.clicked.connect(lambda: self._choose_executable(line_edit, tool_name))
 
@@ -159,7 +159,7 @@ class SettingsDialog(QDialog):
     def _on_detection_started(self) -> None:
         self._set_controls_enabled(False)
         self.save_button.setEnabled(False)
-        self._set_status("正在检测 FFmpeg 环境...", "pending")
+        self._set_status("正在检测 FFmpeg 环境…", "pending")
 
     def _on_detection_finished(self, status: ToolchainStatus) -> None:
         self.result_status = status

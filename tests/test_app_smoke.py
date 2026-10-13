@@ -102,7 +102,7 @@ def test_initial_shell_state(qtbot, isolated_settings) -> None:
     queue_layout = window.empty_queue_icon.parentWidget().layout()
     queue_icon_item = queue_layout.itemAt(queue_layout.indexOf(window.empty_queue_icon))
     assert queue_icon_item.alignment() & Qt.AlignmentFlag.AlignHCenter
-    assert window.media_status.text() == "未选择"
+    assert window.media_status.text() == "尚未选择"
 
 
 def test_svg_rendering_uses_device_pixel_ratio() -> None:
@@ -249,7 +249,7 @@ def test_remove_selected_task(qtbot, tmp_path, isolated_settings) -> None:
 
     assert window.tasks == {}
     assert window.task_stack.currentIndex() == 0
-    assert window.media_status.text() == "未选择"
+    assert window.media_status.text() == "尚未选择"
 
 
 def test_drop_event_imports_local_video(
