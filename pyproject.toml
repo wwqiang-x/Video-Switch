@@ -19,6 +19,9 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: 需要本机 FFmpeg 的端到端测试，没有 ffmpeg 时自动跳过",
+]
 
 [tool.coverage.run]
 source = ["src/video_switch"]
